@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduCareer Guide</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <header>
+        <div class="logo">EduCareer Guide</div>
+        <div class="tagline">Your AI companion for educational and career guidance</div>
+    </header>
+
+    <main>
+        <div class="sidebar">
+            <div class="category-selector">
+                <h3>Focus Area</h3>
+                {% for key, value in categories.items() %}
+                <button class="category-btn {% if key == 'all' %}active{% endif %}" data-category="{{ key }}">{{ value }}</button>
+                {% endfor %}
+            </div>
+            
+            <div class="resources-section">
+                <h3>Helpful Resources</h3>
+                <ul class="resource-list">
+                    <li><a href="#" id="studyGuide"><i class="fas fa-book-open"></i> Study Guides & Tips</a></li>
+                    <li><a href="#" id="careerAssessment"><i class="fas fa-chart-bar"></i> Career Assessment Tools</a></li>
+                    <li><a href="#" id="scholarships"><i class="fas fa-graduation-cap"></i> Scholarship Information</a></li>
+                    <li><a href="#" id="resumeBuilder"><i class="fas fa-file-alt"></i> Resume Builder</a></li>
+                </ul>
+            </div>
+            
+            <div class="actions">
+                <button id="clear-chat" class="action-btn">
+                    <i class="fas fa-trash-alt"></i> Clear Chat
+                </button>
+            </div>
+        </div>
+        
+        <div class="chat-container">
+            <div class="chat-header">
+                <h2>AI Assistant</h2>
+                <span id="current-focus">All Topics</span>
+            </div>
+            
+            <div class="chat-body" id="chat-body">
+                <div class="bot-message message">
+                    <div class="message-content">
+                        Hello! I'm your EduCareer Guide assistant. How can I help you with your education or career journey today?
+                    </div>
+                    <div class="message-time">Just now</div>
+                </div>
+
+                <div class="category-suggestions" id="suggestions-container">
+                    <!-- Suggestions will be loaded here -->
+                </div>
+            </div>
+            
+            <div class="chat-input">
+                <textarea id="user-input" placeholder="Type your question here..." rows="1"></textarea>
+                <button class="send-btn" id="send-message">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p>© 2025 EduCareer Guide | Powered by Gemini API</p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
