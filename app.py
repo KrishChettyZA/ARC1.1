@@ -10,16 +10,10 @@ import google.generativeai as genai
 # Load environment variables
 load_dotenv()
 
-# Gemini API Configuration
-google_api_key = os.getenv('GOOGLE_API_KEY', 'AIzaSyDK4vK-H7UjyppPvblZS_6L-PA6Q8ePKeQ')
-secret_key = os.getenv('SECRET_KEY', 'your-secret-key')  # Default value if not set in .env
-
-# Initialize Gemini API
-genai.configure(api_key=google_api_key)
-
-# Flask application configuration
 app = Flask(__name__)
-app.secret_key = secret_key
+# Use the environment variable for secret key if available, otherwise generate a random one
+app.secret_key = os.getenv('FLASK_SECRET_KEY', os.urandom(24))
+
 
 # Initialize ChromaDB client
 client = chromadb.Client()
