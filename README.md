@@ -45,6 +45,10 @@ langchain-community==0.0.13
 google-generativeai==0.3.1
 markdown2==2.4.10
 langchain
+waitress==3.0.2
+gunicorn==23.0.0
+pypdf==3.17.3
+PyPDF2==3.0.1
 ```
 
 ### Setup Instructions
