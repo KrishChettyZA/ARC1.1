@@ -40,6 +40,8 @@ client = chromadb.Client() # In-memory client (data lost on restart)
 
 # Directory where PDF files are stored relative to this script
 pdf_directory = Path(__file__).parent / "documents"
+# After defining pdf_directory
+print(f"ABSOLUTE PATH FOR DOCUMENTS: {pdf_directory.resolve()}")
 # Ensure the documents directory exists
 os.makedirs(pdf_directory, exist_ok=True)
 
@@ -47,39 +49,27 @@ os.makedirs(pdf_directory, exist_ok=True)
 class GeminiEmbeddingFunction(chromadb.EmbeddingFunction):
     """
     Custom embedding function using Google's Gemini API (models/embedding-001)
-    that adheres to ChromaDB's expected interface.
+    that adheres to ChromaDB's expected interface (post v0.4.16).
     """
     def __init__(self, api_key: str | None = None, model_name: str = "models/embedding-001", task_type: str = "retrieval_document"):
-        """
-        Initializes the embedding function.
-        Args:
-            api_key (str | None): Google API Key. If None, it relies on genai.configure having been called.
-            model_name (str): The name of the embedding model to use.
-            task_type (str): The task type for the embedding model.
-        """
         # If an API key is provided here, configure genai specifically for this instance
-        # This is an alternative if you don't want to rely on the global genai.configure
-        # if api_key:
-        #     genai.configure(api_key=api_key) # Be cautious about re-configuring globally
-
+        if api_key:
+            genai.configure(api_key=api_key)
         self._model_name = model_name
         self._task_type = task_type
         print(f"GeminiEmbeddingFunction initialized with model: {self._model_name}, task_type: {self._task_type}")
 
-    def __call__(self, input_texts: chromadb.Documents) -> chromadb.Embeddings:
+    def __call__(self, input: chromadb.Documents) -> chromadb.Embeddings:
         """
         Generates embeddings for a list of texts.
-
         Args:
-            input_texts: A list of strings (documents) to generate embeddings for.
-
+            input: A list of strings (documents) to generate embeddings for.
         Returns:
             A list of embeddings (lists of floats), one for each input text.
         """
         embeddings: chromadb.Embeddings = []
-        for text in input_texts:
+        for text in input:
             try:
-                # Generate embedding using the specified Google AI model
                 result = genai.embed_content(
                     model=self._model_name,
                     content=text,
@@ -88,11 +78,9 @@ class GeminiEmbeddingFunction(chromadb.EmbeddingFunction):
                 embeddings.append(result['embedding'])
             except Exception as e:
                 print(f"Error generating embedding for text snippet starting with '{text[:50]}...': {e}")
-                # Provide a fallback zero embedding or handle the error more gracefully
-                # The size (768) is typical for models like embedding-001
-                embeddings.append([0.0] * 768)
+                embeddings.append([0.0] * 768)  # Fallback zero vector
         return embeddings
-
+    
 # Instantiate the embedding function
 # It will use the API key configured globally via genai.configure() earlier
 gemini_ef = GeminiEmbeddingFunction()
@@ -331,7 +319,7 @@ RELEVANT INFORMATION:
             # model = genai.GenerativeModel('gemini-1.5-flash-latest')
             # For conversational context, it's better to use start_chat
             model = genai.GenerativeModel(
-                model_name='gemini-1.5-flash-latest',
+                model_name='gemini-2.0-flash',
                 # system_instruction=system_prompt # System instructions are better handled this way
             )
 
