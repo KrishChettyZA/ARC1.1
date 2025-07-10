@@ -1,403 +1,559 @@
-# Import necessary libraries
-from langchain_community.document_loaders import PyPDFLoader  # For loading PDFs
+# --- Imports ---
 import os
+import json
+import time
+import traceback
 from pathlib import Path
-from flask import Flask, request, render_template, jsonify
+from flask import Flask, request, render_template, jsonify, send_from_directory # Added send_from_directory
 from dotenv import load_dotenv
 import chromadb
 import google.generativeai as genai
-import traceback # Import traceback for better error logging
+from google.api_core import exceptions as google_exceptions
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from typing import List, Dict, Any
+import logging # Added logging
 
+# --- Configure logging ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# --- Initial Setup ---
 load_dotenv()
 
 # --- Configuration ---
-# Configure Google Generative AI SDK with API key validation
 try:
+    MODEL_NAME = "gemini-2.0-flash" # Using a powerful and recent model for all tasks
+    EMBEDDING_MODEL_NAME = "models/embedding-001"
+    
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        raise ValueError("Missing GOOGLE_API_KEY environment variable")
+        raise ValueError("Missing GOOGLE_API_KEY environment variable.")
     genai.configure(api_key=api_key)
-    print("Google Generative AI SDK configured successfully.")
+    logging.info("✅ Google Generative AI SDK configured successfully.")
 except Exception as e:
-    print(f"Critical error during initialization: {e}")
-    # Re-raise the exception to stop the app if API key is missing
-    # This prevents the app from starting if it can't connect to the AI service
-    traceback.print_exc()
-    raise
+    logging.critical(f"❌ Configuration Error: {e}")
+    # Exit if API key is not set, as the application cannot function without it
+    import sys
+    sys.exit("Critical configuration error. Exiting.")
 
-# --- Flask App Setup ---
-app = Flask(__name__)
-# Use a stronger, randomly generated secret key in production
-app.secret_key = os.getenv('FLASK_SECRET_KEY', os.urandom(24))
-
-# --- Vector Database Setup ---
-# Using in-memory client for simplicity in this example.
-# For persistence, use PersistentClient:
-# client = chromadb.PersistentClient(path="./chroma_storage")
-client = chromadb.Client()
-
-# Ensure the documents directory exists
-pdf_directory = Path(__file__).parent / "documents"
-pdf_directory.mkdir(parents=True, exist_ok=True) # Create directory if it doesn't exist
-print(f"ABSOLUTE PATH FOR DOCUMENTS: {pdf_directory.resolve()}")
-
-# --- Custom Embedding Function ---
+# --- Custom Embedding Function for ChromaDB ---
 class GeminiEmbeddingFunction(chromadb.EmbeddingFunction):
-    def __init__(self, model_name="models/embedding-001"):
+    """Custom embedding function using the Gemini API."""
+    def __init__(self, model_name=EMBEDDING_MODEL_NAME, task_type="retrieval_document"):
         self._model_name = model_name
-        print(f"GeminiEmbeddingFunction initialized with model: {self._model_name}")
-        try:
-            # Test embedding a simple string to catch potential issues early
-            # Use a dummy text input
-            test_input = ["This is a test sentence."]
-            genai.embed_content(model=self._model_name, content=test_input, task_type="retrieval_document")
-            print(f"Embedding model '{self._model_name}' tested successfully.")
-        except Exception as e:
-            print(f"Warning: Could not test embedding model '{self._model_name}': {e}")
-            print("Please ensure the model name is correct and available for your API key.")
-            # You might want to handle this more strictly in production
+        self._task_type = task_type
+        logging.info(f"✅ GeminiEmbeddingFunction initialized with model: {self._model_name}")
 
     def __call__(self, input: chromadb.Documents) -> chromadb.Embeddings:
-        """
-        Generates embeddings for a list of documents (strings).
-        Args:
-            input: A list of strings (documents).
-        Returns:
-            A list of embeddings (list of lists of floats).
-        """
-        embeddings = []
-        # Gemini's embed_content can take a list of strings for batching
-        # but the Chromadb EmbeddingFunction.__call__ is often invoked with a single string or small batch.
-        # We'll pass the entire input list to genai.embed_content
-        # Note: Ensure input is not empty before calling genai.embed_content
         if not input:
             return []
-
         try:
-            # Pass the list of texts directly to embed_content
+            # Filter out empty strings which can cause embedding errors
+            valid_input = [doc for doc in input if doc.strip()]
+            if not valid_input:
+                return []
+                
             result = genai.embed_content(
                 model=self._model_name,
-                content=input, # Pass the list of documents here
-                task_type="retrieval_document" # Or "retrieval_query" depending on context
+                content=valid_input,
+                task_type=self._task_type
             )
-            # embed_content returns a dict with 'embedding' key, which is a list of embeddings
-            embeddings = result['embedding']
+            return result['embedding']
+        except google_exceptions.ResourceExhausted as e:
+            logging.warning(f"⚠️ Embedding rate limit hit: {e}. Pausing for 5s.")
+            time.sleep(5) # Small pause and retry
+            try:
+                result = genai.embed_content(
+                    model=self._model_name,
+                    content=valid_input,
+                    task_type=self._task_type
+                )
+                return result['embedding']
+            except Exception as retry_e:
+                logging.error(f"⚠️ Embedding retry failed: {retry_e}. Returning zero vectors.")
+                return [[0.0] * 768 for _ in input]
+        except Exception as e:
+            logging.error(f"⚠️ Embedding error: {e}. Returning zero vectors for input of size {len(input)}.")
+            return [[0.0] * 768 for _ in input]
+
+# --- Knowledge Graph Manager (Enhanced for Career Guidance) ---
+class ChromaDBKnowledgeGraph:
+    """Manages detailed entity and relationship extraction for career guidance."""
+    def __init__(self, collection):
+        self.collection = collection
+        self.enabled = True # Can be toggled if KG is optional
+        logging.info("✅ ChromaDB Knowledge Graph manager initialized.")
+
+    def extract_entities_with_gemini(self, text: str) -> Dict[str, Any]:
+        """Uses Gemini to extract detailed, career-focused entities and relationships."""
+        # Only process significant text lengths
+        if not text.strip() or len(text) < 500: # Increased minimum text length for KG extraction
+            return {"entities": [], "relationships": []}
+        
+        # Crafting a precise prompt for JSON output
+        prompt = f"""From the following text about career guidance and economic trends, extract key entities and their relationships based on the provided schema.
+
+Recognized Entity Types:
+- **Career_Pathway**: Specific job roles or career tracks (e.g., "Data Scientist", "AI Ethics Officer", "Green Energy Consultant").
+- **Skill**: Specific abilities, competencies, or knowledge areas (e.g., "Python Programming", "Critical Thinking", "Project Management", "Digital Marketing").
+- **Industry**: A broad sector of the economy (e.g., "Financial Technology", "Healthcare", "Renewable Energy", "E-commerce").
+- **Economic_Trend**: High-level economic, technological, or societal shifts (e.g., "AI Automation", "Gig Economy", "Green Transition", "Remote Work Adoption").
+- **Organization**: Companies, institutions, government bodies, or educational establishments mentioned.
+
+Recognized Relationship Types (always from Source to Target):
+- **REQUIRES_SKILL**: A Career_Pathway needs a specific Skill. (e.g., "Data Scientist" REQUIRES_SKILL "Python Programming").
+- **PART_OF_INDUSTRY**: A Career_Pathway or Organization belongs to an Industry. (e.g., "AI Ethics Officer" PART_OF_INDUSTRY "Technology Governance").
+- **LEADS_TO**: A Skill or Economic_Trend can lead to a Career_Pathway or Industry. (e.g., "AI Automation" LEADS_TO "Robotics Engineer").
+- **INFLUENCES**: An Economic_Trend influences an Industry or Career_Pathway. (e.g., "AI Automation" INFLUENCES "Financial Technology").
+- **OFFERS**: An Organization offers a Career_Pathway or Skill. (e.g., "Google" OFFERS "Software Engineer").
+
+Return the output as a single, valid JSON object with two top-level keys: "entities" and "relationships".
+Each entity must have "name" (string) and "type" (string from recognized types).
+Each relationship must have "source" (string, name of source entity), "target" (string, name of target entity), and "type" (string from recognized types).
+Ensure all extracted entity names match their exact appearance in the text.
+Do not include any other text or markdown formatting outside the JSON.
+
+Text for Analysis (first 8000 characters):
+{text[:8000]}
+"""
+        try:
+            model = genai.GenerativeModel(MODEL_NAME)
+            # Use a low temperature for factual extraction
+            response = model.generate_content(prompt, generation_config=genai.GenerationConfig(temperature=0.0))
+            
+            response_text = response.text.strip()
+            # Clean up potential markdown code blocks that Gemini might include
+            if response_text.startswith("```json") and response_text.endswith("```"):
+                response_text = response_text[len("```json"): -len("```")].strip()
+            elif response_text.startswith("```") and response_text.endswith("```"):
+                 response_text = response_text[len("```"): -len("```")].strip()
+
+            return json.loads(response_text)
+        except google_exceptions.ResourceExhausted as e:
+            logging.warning(f"⚠️ Knowledge Graph extraction rate limit. Pausing for 60s.")
+            time.sleep(60)
+            return {"entities": [], "relationships": []} # Return empty on rate limit
+        except (json.JSONDecodeError, Exception) as e:
+            response_text_for_error = response.text if hasattr(response, 'text') else 'No response text available'
+            logging.error(f"⚠️ Knowledge Graph extraction failed: {e}\nResponse Text (first 500 chars): {response_text_for_error[:500]}\nTraceback: {traceback.format_exc()}")
+            return {"entities": [], "relationships": []}
+
+    def store_knowledge_graph(self, extraction_data: Dict[str, Any], source_doc: str):
+        """Stores extracted entities and relationships in ChromaDB."""
+        if not extraction_data or not extraction_data.get("entities"):
+            logging.info(f"  -> No knowledge graph data to store for {source_doc}.")
+            return
+
+        documents, metadatas, ids = [], [], []
+        
+        for entity in extraction_data.get("entities", []):
+            # Ensure required keys exist and are not empty
+            if not all(k in entity and entity[k] for k in ["name", "type"]): continue
+            
+            doc_text = f"Entity: {entity['name']} (Type: {entity['type']})"
+            if entity.get('description'): # Add description if available
+                doc_text += f" - Description: {entity['description']}"
+            
+            documents.append(doc_text)
+            metadatas.append({
+                "chunk_type": "entity", 
+                "source": source_doc, 
+                "entity_name": entity['name'],
+                "entity_type": entity['type']
+            })
+            ids.append(f"entity_{source_doc}_{entity['name'].replace(' ', '_').replace('.', '')}_{entity['type']}") # Sanitize ID
+
+        for rel in extraction_data.get("relationships", []):
+            if not all(k in rel and rel[k] for k in ["source", "target", "type"]): continue
+            
+            doc_text = f"Relationship: '{rel['source']}' --({rel['type']})--> '{rel['target']}'"
+            documents.append(doc_text)
+            metadatas.append({
+                "chunk_type": "relationship", 
+                "source": source_doc, 
+                "source_entity": rel['source'],
+                "target_entity": rel['target'], 
+                "relationship_type": rel['type']
+            })
+            ids.append(f"rel_{source_doc}_{rel['source'].replace(' ', '_')}_{rel['target'].replace(' ', '_')}_{rel['type']}".replace('.', '')) # Sanitize ID
+
+        if documents:
+            try:
+                self.collection.add(documents=documents, metadatas=metadatas, ids=ids)
+                logging.info(f"  ✅ Stored {len(extraction_data.get('entities',[]))} entities and {len(extraction_data.get('relationships',[]))} relationships for {source_doc}")
+            except Exception as e:
+                logging.error(f"❌ Error adding KG data to ChromaDB for {source_doc}: {e}")
+
+# --- Core Application Setup ---
+app = Flask(__name__)
+
+# --- Directory and Database Initialization ---
+def setup_database_and_directories():
+    """Initializes ChromaDB and creates necessary directories."""
+    base_dir = Path(__file__).parent
+    storage_path = base_dir / "arc_chroma_db_storage"
+    storage_path.mkdir(parents=True, exist_ok=True)
+    
+    pdf_dir = base_dir / "documents"
+    pdf_dir.mkdir(exist_ok=True)
+    
+    history_dir = base_dir / "history"
+    history_dir.mkdir(exist_ok=True)
+    
+    logging.info(f"📁 PDF Directory: {pdf_dir.resolve()}")
+    logging.info(f"📁 History Directory: {history_dir.resolve()}")
+    logging.info(f"📁 ChromaDB Storage: {storage_path.resolve()}")
+
+    client = chromadb.PersistentClient(path=str(storage_path))
+    embedding_function = GeminiEmbeddingFunction()
+    
+    collection = client.get_or_create_collection(
+        name="arc_career_guidance", 
+        embedding_function=embedding_function
+    )
+    
+    return collection, pdf_dir, history_dir
+
+# Initialize global variables at startup
+COLLECTION, PDF_DIRECTORY, HISTORY_DIRECTORY = setup_database_and_directories()
+KG_MANAGER = ChromaDBKnowledgeGraph(COLLECTION)
+
+# --- Document Processing ---
+def process_all_pdfs():
+    """Scans for and processes all PDF files using a text splitter for larger chunks."""
+    logging.info("\n🔍 Scanning for PDF documents...")
+    pdf_files = list(PDF_DIRECTORY.glob("*.pdf"))
+    
+    if not pdf_files:
+        logging.warning("📂 No PDF files found. Add PDFs to the 'documents' folder and restart.")
+        return
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=4000,
+        chunk_overlap=400,
+        length_function=len,
+    )
+
+    logging.info(f"📁 Found {len(pdf_files)} PDF file(s) to process.")
+    for pdf_file in pdf_files:
+        try:
+            # Check if document already processed by looking for chunks from this source
+            existing_chunks = COLLECTION.get(where={"source": pdf_file.name}, limit=1)['ids']
+            if existing_chunks:
+                logging.info(f"📄 Skipping already processed document: {pdf_file.name}")
+                continue
+
+            logging.info(f"\n📄 Processing {pdf_file.name}...")
+            loader = PyPDFLoader(str(pdf_file))
+            pages = loader.load()
+            
+            full_document_text = "\n".join([page.page_content for page in pages])
+            chunks = text_splitter.split_text(full_document_text)
+
+            documents, metadatas, ids = [], [], []
+            for i, chunk in enumerate(chunks):
+                if chunk.strip():
+                    documents.append(chunk)
+                    metadatas.append({"source": pdf_file.name, "chunk_index": i + 1, "chunk_type": "document"})
+                    ids.append(f"{pdf_file.stem}_chunk_{i}")
+            
+            if documents:
+                COLLECTION.add(documents=documents, metadatas=metadatas, ids=ids)
+                logging.info(f"  ✅ Added {len(documents)} text chunks to ChromaDB.")
+                
+                # Extract and store knowledge graph data
+                kg_data = KG_MANAGER.extract_entities_with_gemini(full_document_text)
+                KG_MANAGER.store_knowledge_graph(kg_data, pdf_file.name)
 
         except Exception as e:
-            print(f"Error generating embeddings for batch (first 100 chars): '{input[0][:100]}...': {e}")
-            traceback.print_exc()
-            # Use the expected dimension size (768 for embedding-001) for fallback
-            fallback_vector_size = 768 # embedding-001 dimension
-            # Add more checks here if you use different embedding models
-            print(f"Using fallback vectors of size {fallback_vector_size} for the batch.")
-            # Return a list of zero vectors matching the size of the input batch
-            embeddings = [[0.0] * fallback_vector_size for _ in input]
+            logging.error(f"❌ Error processing {pdf_file.name}: {e}", exc_info=True)
+    
+    logging.info(f"\n🎉 PDF processing complete. Total items in collection: {COLLECTION.count()}")
 
-        # Ensure the number of returned embeddings matches the number of input documents
-        if len(embeddings) != len(input):
-             print(f"Warning: Mismatch in embedding count. Expected {len(input)}, got {len(embeddings)}.")
-             # Fallback to returning zero vectors if embedding failed for some reason
-             fallback_vector_size = 768
-             embeddings = [[0.0] * fallback_vector_size for _ in input]
+# --- Chat History Functions ---
+def save_chat_history(session_id: str, history: List[Dict]):
+    """Saves chat history for a given session ID."""
+    history_file = HISTORY_DIRECTORY / f"{session_id}.json"
+    try:
+        with open(history_file, 'w') as f:
+            json.dump(history, f, indent=2) # Use indent for readability
+    except IOError as e:
+        logging.error(f"Error saving chat history for session {session_id}: {e}")
 
+def load_chat_history(session_id: str) -> List[Dict]:
+    """Loads chat history for a given session ID."""
+    history_file = HISTORY_DIRECTORY / f"{session_id}.json"
+    if history_file.exists():
+        try:
+            with open(history_file, 'r') as f:
+                return json.load(f)
+        except json.JSONDecodeError as e:
+            logging.error(f"Error decoding JSON for session {session_id}: {e}. Returning empty history.")
+            return [] # Return empty history if file is corrupted
+        except Exception as e:
+            logging.error(f"Error loading chat history for session {session_id}: {e}. Returning empty history.")
+            return []
+    return []
 
-        return embeddings
+# --- Retrieval and Generation (Now with History and Enhanced Citation Formatting!) ---
+def enhanced_retrieval_and_generation(message: str, history: List[Dict]):
+    """
+    Performs RAG using conversation history for context-aware retrieval and generation.
+    Formats citations to match frontend expectations.
+    """
+    # Create a contextual query from history for better retrieval
+    # Take last 6 turns (including current user message) for context
+    history_for_query_context = [
+        f"{turn['role']}: {turn['parts'][0]}" 
+        for turn in history[-6:] if turn.get('parts') and turn['parts']
+    ]
+    contextual_query = "\n".join(history_for_query_context) + f"\nuser: {message}"
 
-# --- Collection Management ---
-collection_name = "my_pdf_collection"
-# Initialize the embedding function
-gemini_ef = GeminiEmbeddingFunction()
+    logging.info(f"🔎 Contextual Query for Retrieval:\n---\n{contextual_query}\n---")
 
-# Clean up the collection each time the app starts for this example
-# In a real application, you would manage this persistence carefully
-try:
-    # Check if collection exists before trying to delete
-    existing_collections = client.list_collections()
-    if any(col.name == collection_name for col in existing_collections):
-         client.delete_collection(name=collection_name)
-         print(f"Collection '{collection_name}' deleted successfully.")
+    documents_results = []
+    # Try fetching documents and entities/relationships
+    try:
+        document_query_results = COLLECTION.query(
+            query_texts=[contextual_query],
+            n_results=6, # Get up to 6 document chunks
+            where={"chunk_type": "document"}
+        )
+        documents_results.extend(zip(
+            document_query_results.get('documents', [[]])[0],
+            document_query_results.get('metadatas', [[]])[0]
+        ))
+    except Exception as e:
+        logging.warning(f"Failed to retrieve document chunks: {e}")
+
+    try:
+        # Also query for relevant KG entities/relationships
+        kg_query_results = COLLECTION.query(
+            query_texts=[contextual_query],
+            n_results=2, # Get a couple of KG entries
+            where={"chunk_type": {"$in": ["entity", "relationship"]}}
+        )
+        documents_results.extend(zip(
+            kg_query_results.get('documents', [[]])[0],
+            kg_query_results.get('metadatas', [[]])[0]
+        ))
+    except Exception as e:
+        logging.warning(f"Failed to retrieve knowledge graph entries: {e}")
+
+    # Remove duplicates if any (e.g., same chunk returned by different queries or types)
+    unique_documents = {}
+    for doc_text, meta_data in documents_results:
+        # Use a combination of source, chunk_index, and chunk_type as a unique key
+        key = (meta_data.get('source'), meta_data.get('chunk_index'), meta_data.get('chunk_type'))
+        unique_documents[key] = (doc_text, meta_data)
+    
+    sorted_unique_documents = list(unique_documents.values()) # Convert back to list
+
+    retrieved_context_str = "DOCUMENT EXCERPTS:\n"
+    citations_for_frontend = []
+    if not sorted_unique_documents:
+        retrieved_context_str += "No relevant documents or knowledge graph entries were found for this query.\n"
     else:
-         print(f"Collection '{collection_name}' does not exist - will create new")
+        for i, (doc, meta) in enumerate(sorted_unique_documents):
+            source = meta.get('source', 'Unknown Document')
+            chunk_type = meta.get('chunk_type', 'chunk')
+            
+            # For page number, try to extract from chunk_index or add specific metadata
+            page_info = f"Chunk {meta.get('chunk_index', 'N/A')}"
+            
+            retrieved_context_str += f"Source [{i+1}]: {source} ({chunk_type}, {page_info})\n{doc}\n\n"
+            
+            # Format citations specifically for the frontend
+            citations_for_frontend.append({
+                "id": i + 1, # Frontend expects a sequential ID for linking
+                "source": source,
+                "page_number": page_info, # Use the chunk info as 'page_number'
+                "content": doc # Send the full chunk content
+            })
+    
+    # Format chat history for the generation prompt
+    formatted_history = ""
+    # Only include 'user' and 'model' roles, and ensure 'parts' is present and not empty
+    for turn in history:
+        if isinstance(turn.get('parts'), list) and turn['parts']:
+            role = turn['role'].capitalize()
+            # If citations are present, they are already part of the model's text in the history
+            formatted_history += f"**{role}**: {turn['parts'][0]}\n\n"
 
-except Exception as e:
-    print(f"Error during collection deletion attempt: {e}")
-    # Continue, as the goal is just to ensure a fresh start
-
-# Re-create the collection
-try:
-    collection = client.create_collection(
-        name=collection_name,
-        embedding_function=gemini_ef # Assign the custom embedding function
+    system_prompt = (
+        "You are the ARC Principal Career Strategist, an expert on the Refracted Economies Framework. "
+        "Your role is to provide detailed, comprehensive, and strategic career guidance based on the user's questions, "
+        "the conversation history, and the provided document excerpts. "
+        "Synthesize all information to answer the user's latest question. Explain the 'why' and 'how'. "
+        "Structure your response with clear headings, bullet points, and bolded keywords. "
+        "Crucially, cite your sources precisely using numerical superscripts like [^1], [^2], etc., "
+        "corresponding to the 'Source [N]' in the 'DOCUMENT EXCERPTS' section. "
+        "For example, if you use information from 'Source [1]: my_document.pdf', cite it as [^1]."
+        "Prioritize information from the provided document excerpts when relevant. If the answer is not in the documents, state that you don't know but offer general guidance."
     )
-    print(f"Collection '{collection_name}' created successfully.")
-except Exception as e:
-    print(f"Error creating collection '{collection_name}': {e}")
-    traceback.print_exc()
-    # If collection creation fails, the app cannot function correctly for chat
-    collection = None # Set collection to None if creation failed
+    
+    final_prompt = (
+        f"{system_prompt}\n\n"
+        f"CONVERSATION HISTORY:\n---\n{formatted_history.strip()}\n---\n\n"
+        f"{retrieved_context_str}\n\n"
+        f"Based on the conversation history and the provided context, answer the following question:\n"
+        f"**User**: {message}\n\n"
+        f"**Principal Strategist's Response**:"
+    )
+    
+    try:
+        model = genai.GenerativeModel(MODEL_NAME)
+        # Pass the formatted prompt to the model directly
+        response = model.generate_content(final_prompt, generation_config=genai.GenerationConfig(temperature=0.2))
+        
+        # Access response text safely
+        model_response_content = ""
+        if response.candidates and response.candidates[0].content:
+            model_response_content = response.candidates[0].content.parts[0].text
+        else:
+            logging.warning("Model response content was empty.")
+            model_response_content = "Sorry, I couldn't generate a detailed response."
 
+        return model_response_content, citations_for_frontend
+    
+    except google_exceptions.ResourceExhausted as e:
+        logging.error(f"❌ LLM generation error due to rate limit: {e}")
+        return "The service is currently busy due to high demand. Please wait a minute and try your question again.", []
+    except Exception as e:
+        logging.error(f"❌ LLM generation error: {e}", exc_info=True)
+        return "Sorry, I encountered an error generating a response.", []
 
-# --- PDF Processing ---
-# Only process PDFs if collection was created successfully
-if collection is not None:
-    print(f"Loading PDFs from: {pdf_directory}")
-    doc_id_counter = 0
-    pdf_files_found = list(pdf_directory.glob("*.pdf"))
-
-    if not pdf_files_found:
-        print(f"⚠️ No PDF files found in {pdf_directory}")
-    else:
-        print(f"Found {len(pdf_files_found)} PDF file(s). Processing...")
-        for pdf_file in pdf_files_found:
-            print(f"Processing {pdf_file.name}...")
-            try:
-                loader = PyPDFLoader(str(pdf_file))
-                # Using load_and_split() which handles splitting into Document objects
-                pages = loader.load_and_split()
-
-                if not pages:
-                    print(f"⚠️ No content extracted from {pdf_file.name}")
-                    continue
-
-                # Batching for adding documents to ChromaDB
-                # A reasonable batch size balances memory usage and add performance
-                batch_size = 100
-                for i in range(0, len(pages), batch_size):
-                    batch = pages[i:i+batch_size]
-
-                    # Prepare documents, metadatas, and ids for the batch
-                    batch_documents = [item.page_content for item in batch]
-                    batch_metadatas = []
-                    batch_ids = []
-                    for idx, item in enumerate(batch):
-                         # Ensure metadata is a dict and page number is handled
-                         metadata = item.metadata if isinstance(item.metadata, dict) else {}
-                         # Langchain's PyPDFLoader adds 'page' key (0-indexed)
-                         page_num = metadata.get('page')
-                         if page_num is not None:
-                             # Convert to 1-indexed page number for users
-                             page_num += 1
-                         else:
-                             # Fallback if 'page' is not in metadata
-                             page_num = f"unknown_{i+idx+1}" # Use batch index + 1 as fallback
-
-                         batch_metadatas.append({
-                            "page": page_num,
-                            "source": pdf_file.name
-                         })
-                         # Ensure IDs are unique string identifiers
-                         batch_ids.append(f"{pdf_file.stem}_{doc_id_counter + i + idx}") # Use overall counter for uniqueness
-
-                    # Add the batch to the collection
-                    # ChromaDB add method expects lists for documents, metadatas, and ids
-                    if batch_documents: # Ensure batch is not empty
-                        try:
-                             collection.add(
-                                documents=batch_documents,
-                                metadatas=batch_metadatas,
-                                ids=batch_ids
-                            )
-                             print(f"-> Added batch of {len(batch_documents)} from {pdf_file.name} (IDs {batch_ids[0]} to {batch_ids[-1]})")
-                        except Exception as add_error:
-                             print(f"❌ Error adding batch from {pdf_file.name}: {add_error}")
-                             traceback.print_exc()
-
-
-                doc_id_counter += len(pages) # Increment total counter after processing file
-                print(f"✅ Finished processing and adding pages from {pdf_file.name}")
-
-            except Exception as e:
-                print(f"❌ Error processing {pdf_file.name}: {str(e)}")
-                traceback.print_exc() # Print detailed traceback for processing errors
-
-        print("Finished processing PDF files.")
-        print(f"Total documents in collection: {collection.count()}")
-else:
-     print("Skipping PDF processing as collection creation failed.")
-
-
-# --- UI Configuration ---
-categories = {
-    'all': 'All Topics',
-    'education': 'Education Planning',
-    'career': 'Career Development',
-    'skills': 'Skills & Training',
-    'finance': 'Financial Aid'
-}
-
-# Simple in-memory storage for chat sessions.
-# Use Redis, a database, or server-side sessions for production persistence.
-chat_sessions = {}
-
-# --- Routes ---
+# --- Flask API Endpoints ---
 @app.route('/')
-def home():
-    # Pass a flag indicating if the collection is ready (PDFs loaded)
-    # This allows the frontend to enable the chat interface
-    is_ready = collection is not None and collection.count() > 0
-    return render_template('index.html', categories=categories, is_ready=is_ready)
-
-@app.route('/api/suggestions')
-def get_suggestions():
-    category = request.args.get('category', 'all')
-    suggestions = {
-        'all': [
-            "What are some good study techniques?",
-            "How to choose the right career?",
-            "Can you tell me about scholarship opportunities?"
-        ],
-        'education': [
-            "How to improve my study habits?",
-            "What degrees lead to high-paying jobs?",
-            "Should I consider graduate school?"
-        ],
-        'career': [
-            "How to write an effective resume?",
-            "Tips for job interviews?",
-            "How to negotiate a salary?"
-        ],
-        'skills': [
-            "What programming languages should I learn?",
-            "How to develop leadership skills?",
-            "Online learning platforms recommendation?"
-        ],
-        'finance': [
-            "How to apply for financial aid?",
-            "FAFSA application tips?",
-            "Scholarships for first-generation students?"
-        ]
-    }
-    return jsonify({'suggestions': suggestions.get(category, suggestions['all'])})
+def index():
+    return render_template('index.html')
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    # Check if the collection is ready before processing chats
-    if collection is None or collection.count() == 0:
-         print("Chat requested but database is not ready.")
-         return jsonify({'error': True, 'response': 'Database is not ready. Please wait for documents to load or check server logs for errors during processing.'}), 503
-
+    """Handles chat requests, interacts with the Generative Model, and manages history."""
     try:
-        data = request.json
-        if not data:
-            return jsonify({'error': True, 'response': 'Empty request'}), 400
+        data = request.get_json()
+        user_message = data.get('message', '').strip()
+        session_id = data.get('session_id')
 
-        message = data.get('message', '').strip()
-        session_id = data.get('session_id', 'default_session')
-        category = data.get('category', 'all')
+        if not user_message or not session_id:
+            return jsonify({'error': True, 'response': 'Message and session_id are required'}), 400
 
-        if not message:
-            return jsonify({'error': True, 'response': 'Empty message'}), 400
+        logging.info(f"Received message for session {session_id}: {user_message}")
 
-        # Initialize session if not exists
-        if session_id not in chat_sessions:
-            # Ensure history format is correct for genai.start_chat
-            # [{"role": "user" | "model", "parts": [content_objects]}]
-            chat_sessions[session_id] = []
+        # Load existing chat history
+        chat_history = load_chat_history(session_id)
 
-        # Build context from history
-        # Limit history length to avoid exceeding context windows and token limits
-        # Keep history in the correct format for genai.start_chat
-        history = chat_sessions[session_id][-10:] # Limit history to last 10 turns (user+model)
-
-        # --- RAG: Retrieve relevant documents based on user query ---
-        retrieved_context = "No relevant documents found."
-        try:
-            # FIX: Manually embed the query text using the same embedding function
-            # used for documents, then query ChromaDB using the embeddings.
-            # This bypasses the apparent bug in ChromaDB's text query validation.
-            query_embedding_result = gemini_ef([message]) # Pass message in a list to __call__
-            query_embedding = query_embedding_result[0] # Get the first (and only) embedding
-
-            # Now query the collection using the embedding
-            results = collection.query(
-                query_embeddings=[query_embedding], # Pass the embedding in a list
-                n_results=5 # Get top 5 results for better context
-            )
-
-            # Extract text from results. ChromaDB returns results['documents'] as a list of lists
-            # The outer list corresponds to the query (we have one query here).
-            # The inner list contains the document contents for the top results.
-            if results and results.get('documents') and results['documents'][0]:
-                retrieved_context = "\n\n".join(results['documents'][0])
-            else:
-                 retrieved_context = "No relevant documents found."
-
-        except Exception as e:
-            print(f"Error during document retrieval: {e}")
-            traceback.print_exc()
-            # Continue with "No context found" message if retrieval fails
-            retrieved_context = "Error retrieving documents."
-
-
-        # --- Generate Response using the LLM ---
-        try:
-            # Construct the final prompt including context and query
-            # system_instruction is preferable but not available in this SDK version with chat history
-            # So we format the prompt manually
-            final_prompt = f"""You are EduCareer Guide, focused on {category}. Provide helpful and informative answers based *strictly* on the provided RELEVANT INFORMATION. If the information does not contain the answer to the user's query, state clearly that you cannot answer based on the documents.
-
-RELEVANT INFORMATION:
-{retrieved_context}
-
-User Query: {message}
-Answer:
-"""
-
-            # Load Gemini model
-            # Verify 'gemini-2.0-flash' is supported in your google-generativeai==0.4.0 version.
-            # If you get model-related errors, try 'gemini-1.5-flash' or 'gemini-1.0-pro'.
-            model = genai.GenerativeModel(model_name='gemini-2.0-flash')
-
-            # Start chat with previous history
-            # history must be in the correct format [{"role": ..., "parts": [...]}, ...]
-            chat_session = model.start_chat(history=history)
-
-            # Send the final prompt containing system instructions and context as the next user turn
-            # The content needs to be in a list of parts
-            response = chat_session.send_message([final_prompt])
-
-            # Append user message and assistant response to session history
-            # Ensure the appended messages are also in the correct format
-            # [{"role": ..., "parts": [...]}, ...]
-            chat_sessions[session_id].append({"role": "user", "parts": [message]})
-            # Make sure the model response parts are also a list of strings
-            chat_sessions[session_id].append({"role": "model", "parts": [response.text]})
-
-            return jsonify({'response': response.text})
-
-        except Exception as e:
-            print(f"Model error during chat generation: {e}")
-            traceback.print_exc() # Print detailed traceback for model errors
-            # Provide a user-friendly error message
-            return jsonify({'error': True, 'response': 'AI service is currently unavailable or encountered an error generating a response.'}), 503
+        # Get response and citations from the RAG pipeline
+        response_text, citations_data = enhanced_retrieval_and_generation(user_message, chat_history)
+        
+        # Append user's message to history *before* the model's response for correct turn order
+        chat_history.append({"role": "user", "parts": [user_message]})
+        
+        # Append model's response and structured citations to history for saving
+        chat_history.append({
+            "role": "model",
+            "parts": [response_text], # Store the full text
+            "citations": citations_data # Store structured citations
+        })
+        save_chat_history(session_id, chat_history)
+        
+        logging.info(f"Model responded for session {session_id}. Citations sent: {len(citations_data)}")
+        return jsonify({
+            'response': response_text,
+            'citations': citations_data, # Ensure citations are part of the API response
+            'success': True
+        })
 
     except Exception as e:
-        print(f"Server error during chat processing: {e}")
-        traceback.print_exc() # Print detailed traceback for general server errors
-        return jsonify({'error': True, 'response': 'Internal server error processing your request.'}), 500
+        logging.error(f"General error in /api/chat: {e}", exc_info=True)
+        return jsonify({'error': True, 'response': f'An unexpected error occurred: {e}'}), 500
 
-@app.route('/api/clear', methods=['POST'])
-def clear_chat():
-    """Clears the chat history for a given session ID."""
+@app.route('/api/sessions', methods=['GET'])
+def list_sessions():
+    """Returns a list of all available chat sessions with previews."""
+    sessions = []
     try:
-        session_id = request.json.get('session_id')
-        if session_id in chat_sessions:
-            del chat_sessions[session_id]
-            print(f"Cleared chat session: {session_id}")
-        return jsonify({'success': True})
+        # Sort files by modification time, newest first
+        files = sorted(HISTORY_DIRECTORY.glob("*.json"), key=os.path.getmtime, reverse=True)
     except Exception as e:
-        print(f"Error clearing chat session: {e}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logging.error(f"Error listing history files: {e}")
+        return jsonify({'success': False, 'sessions': [], 'message': 'Could not read history directory'})
 
+    for f in files:
+        session_id = f.stem
+        try:
+            with open(f, 'r') as hist_file:
+                history_data = json.load(hist_file)
+
+            # Find the first user message for preview
+            first_user_message = "New Chat Session" # Default preview if no user messages
+            for turn in history_data:
+                # Ensure 'parts' exists and has content before accessing
+                if turn.get('role') == 'user' and isinstance(turn.get('parts'), list) and turn['parts']:
+                    first_user_message = turn['parts'][0]
+                    break # Found the first user message, exit loop
+
+            preview = first_user_message[:50] + ('...' if len(first_user_message) > 50 else '')
+            sessions.append({'id': session_id, 'preview': preview})
+        except (json.JSONDecodeError, KeyError, IndexError) as e:
+            logging.warning(f"Could not process session file {f.name}: {e}. Skipping this file.")
+            continue # Skip corrupted or malformed files
+    
+    logging.info(f"Found {len(sessions)} chat sessions.")
+    return jsonify({'success': True, 'sessions': sessions})
+
+@app.route('/api/history', methods=['GET'])
+def get_history():
+    """Returns the chat history for a specific session."""
+    session_id = request.args.get('session_id')
+    if not session_id:
+        return jsonify({'error': True, 'message': 'Session ID required'}), 400
+    
+    # Load history including the 'citations' field
+    history = load_chat_history(session_id)
+    
+    # The history loaded already contains 'parts' and 'citations' as needed by the frontend
+    return jsonify({'success': True, 'history': history})
+
+@app.route('/api/delete_session/<session_id>', methods=['DELETE'])
+def delete_session(session_id):
+    """Deletes a specific chat session's history file."""
+    history_file = HISTORY_DIRECTORY / f"{session_id}.json"
+    if history_file.exists():
+        try:
+            os.remove(history_file)
+            logging.info(f"🗑️ Deleted session file: {session_id}.json")
+            return jsonify({'success': True, 'message': f'Session {session_id} deleted successfully.'})
+        except Exception as e:
+            logging.error(f"❌ Error deleting session file {session_id}.json: {e}", exc_info=True)
+            return jsonify({'success': False, 'message': f'Failed to delete session file: {str(e)}'}), 500
+    logging.warning(f"Attempted to delete non-existent session: {session_id}.json")
+    return jsonify({'success': False, 'message': 'Session not found.'}), 404
+
+@app.route('/api/pdf/<path:filename>') # Use path: to allow slashes in filename if needed
+def serve_pdf(filename):
+    """Serves PDF files from the documents directory."""
+    logging.info(f"Serving PDF: {filename}")
+    try:
+        # Prevent directory traversal with send_from_directory security
+        return send_from_directory(PDF_DIRECTORY, filename, as_attachment=False)
+    except FileNotFoundError:
+        logging.warning(f"PDF file not found: {filename}")
+        return "File not found.", 404
+    except Exception as e:
+        logging.error(f"Error serving PDF file {filename}: {e}", exc_info=True)
+        return f"Error serving file: {e}", 500
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    # For production, use a production WSGI server like Waitress or Gunicorn:
-    # waitress-serve --listen=*:5001 app:app
-    # gunicorn --bind 0.0.0.0:5001 app:app
-    port = int(os.environ.get('PORT', 5001))
-    print(f"🚀 Starting Flask development server on port {port}")
-    print("⚠️ WARNING: Using Flask's built-in development server. Not recommended for production.")
-    # debug=True should only be used during development
-    app.run(host='0.0.0.0', port=port, debug=True)
+    # Process all PDFs on startup to populate the ChromaDB
+    process_all_pdfs()
+    
+    # Get port from environment variable or default to 5004
+    port = int(os.environ.get('PORT', 5004))
+    logging.info(f"\n🚀 Starting Flask server on http://127.0.0.1:{port}")
+    
+    # Set debug=False for production to avoid running initial setup twice and for security.
+    # Use host='0.0.0.0' to make the server accessible externally (e.g., in a Docker container).
+    app.run(host='0.0.0.0', port=port, debug=False)
