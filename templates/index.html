@@ -3,15 +3,439 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ARC Career Strategist</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <title>AI Career Guidance</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #6a0dad;
+            --background-color: #f4f6f8;
+            --container-bg: #ffffff;
+            --sidebar-bg: #1e1e2f;
+            --sidebar-text: #e0e0e0;
+            --sidebar-header-bg: #2a2a45;
+            --references-bg: #fdfdff;
+            --header-bg: var(--primary-color);
+            --footer-bg: #1a1a2e;
+            --bot-message-bg: #e9e9f0;
+            --user-message-bg: #d8bfeb;
+            --border-color: #e0e0e0;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --font-family: 'Poppins', sans-serif;
+        }
+
+        html, body {
+            height: 100%;
+            margin: 0;
+            font-family: var(--font-family);
+            background-color: var(--background-color);
+            overflow: hidden;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .container {
+            display: flex;
+            flex-grow: 1;
+            overflow: hidden;
+            background-color: var(--container-bg);
+            position: relative;
+        }
+
+        .sidebar {
+            width: 260px;
+            background-color: var(--sidebar-bg);
+            color: var(--sidebar-text);
+            display: flex;
+            flex-direction: column;
+            transition: margin-left 0.3s ease;
+            flex-shrink: 0;
+            z-index: 1002;
+        }
+
+        .sidebar.collapsed {
+            margin-left: -260px;
+        }
+
+        .sidebar-header {
+            padding: 1rem;
+            background-color: var(--sidebar-header-bg);
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .sidebar-header h2 {
+            margin: 0;
+            text-align: center;
+        }
+
+        .new-chat-btn {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.75rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            transition: background-color 0.2s;
+        }
+        .new-chat-btn:hover {
+            background-color: #5a0cad;
+        }
+
+        .session-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            flex-grow: 1;
+            overflow-y: auto;
+        }
+        
+        .session-list li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.8rem 1rem;
+            border-bottom: 1px solid var(--sidebar-header-bg);
+            cursor: pointer;
+            transition: background-color 0.2s;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+        .session-list li:hover {
+            background-color: var(--sidebar-header-bg);
+        }
+        .session-item-text {
+            flex-grow: 1;
+            margin-right: 8px;
+        }
+        .session-menu {
+            position: relative;
+        }
+        .session-menu-btn {
+            background: transparent;
+            border: none;
+            color: var(--sidebar-text);
+            cursor: pointer;
+            padding: 4px;
+        }
+        .session-menu-dropdown {
+            position: absolute;
+            right: 0;
+            top: 25px;
+            background-color: #3c3c5a;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+
+        .toggle-sidebar-btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            width: 25px;
+            height: 50px;
+            cursor: pointer;
+            position: absolute;
+            top: 50%;
+            left: 0;
+            transform: translateY(-50%);
+            z-index: 1001;
+            border-radius: 0 8px 8px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .chat-area {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background-color: var(--container-bg);
+            position: relative;
+        }
+
+        .chat-header {
+            background: var(--header-bg);
+            color: white;
+            padding: 0.5rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 5px var(--shadow-color);
+            z-index: 10;
+        }
+        .header-logo {
+            height: 50px;
+            width: auto;
+            margin-right: 1rem;
+        }
+        .header-title-container {
+            flex-grow: 1;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .chat-header h1 {
+            margin: 0;
+            font-size: 1.2rem;
+        }
+        .header-subtitle {
+            margin: 0.25rem 0 0;
+            font-weight: 300;
+            font-size: 0.9rem;
+        }
+        
+        .mobile-toggle-btn {
+            display: none; /* Hidden by default */
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.2rem;
+            cursor: pointer;
+        }
+
+        .chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .message-bubble {
+            background-color: var(--bot-message-bg);
+            padding: 1rem;
+            border-radius: 12px;
+            max-width: 90%;
+            align-self: flex-start;
+            line-height: 1.6;
+        }
+        .user-message .message-bubble {
+            background-color: var(--user-message-bg);
+            align-self: flex-end;
+        }
+
+        .chat-input-area {
+            padding: 1rem 1.5rem;
+            border-top: 1px solid var(--border-color);
+        }
+        .input-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background-color: #fff;
+            border-radius: 12px;
+            padding: 0.5rem;
+            border: 1px solid var(--border-color);
+        }
+        .input-wrapper textarea {
+            flex-grow: 1;
+            border: none;
+            outline: none;
+            resize: none;
+            font-family: var(--font-family);
+            font-size: 1rem;
+            padding: 0.5rem;
+            background: transparent;
+        }
+        .send-btn {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            width: 44px;
+            height: 44px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.2rem;
+            transition: background-color 0.2s;
+        }
+        .send-btn:hover {
+            background-color: #5a0cad;
+        }
+
+        .references-panel {
+            width: 450px;
+            min-width: 350px;
+            background-color: var(--references-bg);
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            transition: margin-right 0.3s ease;
+            flex-shrink: 0;
+            z-index: 1002;
+        }
+        .references-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .references-header h2 {
+            margin: 0;
+        }
+        .references-content {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            font-size: 0.85rem;
+        }
+        
+        .reference-item {
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .reference-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+
+        .no-references {
+            color: #888;
+            text-align: center;
+            margin-top: 2rem;
+        }
+
+        .app-footer {
+            background-color: var(--footer-bg);
+            color: var(--sidebar-text);
+            padding: 0.75rem 1.5rem;
+            flex-shrink: 0;
+        }
+        .footer-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8rem;
+        }
+        .footer-link {
+            color: var(--sidebar-text);
+            text-decoration: none;
+        }
+        .footer-link:hover {
+            text-decoration: underline;
+        }
+        .footer-separator {
+            margin: 0 0.5rem;
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+        .loading-spinner .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: var(--primary-color);
+            animation: spin 1s ease infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .overlay-backdrop {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1001;
+        }
+
+        /* --- Responsive Styles --- */
+        @media (min-width: 769px) {
+            .header-subtitle {
+                display: block; /* **FIX:** Show subtitle on desktop */
+            }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                top: 0;
+                left: -260px;
+                height: 100%;
+                margin-left: 0;
+                transition: left 0.3s ease;
+            }
+            .sidebar.open {
+                left: 0;
+            }
+
+            .references-panel {
+                position: fixed;
+                top: 0;
+                right: -100%;
+                width: 85%;
+                max-width: 320px;
+                height: 100%;
+                margin-right: 0;
+                border-left: none;
+                box-shadow: -2px 0 10px rgba(0,0,0,0.2);
+                transition: right 0.3s ease;
+            }
+            .references-panel.open {
+                right: 0;
+            }
+
+            .toggle-sidebar-btn {
+                display: none;
+            }
+
+            .mobile-toggle-btn {
+                display: block;
+            }
+
+            .header-title-container {
+                justify-content: flex-start;
+                margin: 0 auto;
+            }
+            .chat-header h1 {
+                font-size: 1rem;
+            }
+            .header-logo {
+                height: 40px;
+            }
+            .header-subtitle {
+                display: none; /* **FIX:** Hide subtitle on mobile */
+            }
+
+            .footer-content {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+        }
+
+    </style>
 </head>
 <body>
-    <div class="container">
+    <div class="overlay-backdrop" id="overlayBackdrop"></div>
+    <div class="container" id="mainContainer">
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <h2>ARC Sessions</h2>
@@ -20,27 +444,41 @@
                 </button>
             </div>
             <ul class="session-list" id="sessionList">
-                <!-- Sessions will be dynamically loaded here -->
             </ul>
         </aside>
 
         <main class="chat-area">
-            <header class="chat-header purple-header">
-                <h1>ARC Principal Career Strategist</h1>
-                <p class="header-subtitle">Expert on the Refracted Economies Framework</p>
+            <button id="toggleSidebarBtn" class="toggle-sidebar-btn" title="Toggle History">
+                <i class="fas fa-chevron-left"></i>
+            </button>
+
+            <header class="chat-header">
+                <button class="mobile-toggle-btn" id="mobileHistoryBtn" title="Show Sessions">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="header-title-container">
+                    <img src="/static/Images/REFLogo.png" alt="REF Logo" class="header-logo">
+                    <div>
+                        <h1>AI Powered Career Guidance</h1>
+                        <p class="header-subtitle">Applying the Refracted Economies Framework</p>
+                    </div>
+                </div>
+                <button class="mobile-toggle-btn" id="mobileReferencesBtn" title="Show References">
+                    <i class="fas fa-book-open"></i>
+                </button>
             </header>
 
             <div class="chat-messages" id="chatMessages">
                 <div class="chat-message bot-message intro-message">
                     <div class="message-bubble">
-                        Hello! I am the **ARC Principal Career Strategist**, an expert on the Refracted Economies Framework. I'm here to provide detailed, comprehensive, and strategic career guidance. How can I assist you today?
+                        Hello! I am an <strong>AI-Powered Career Guidance tool</strong>, built upon the HSRC's Refracted Economies Framework. I'm here to provide detailed, comprehensive, and strategic career guidance. How can I assist you today?
                     </div>
                 </div>
             </div>
 
             <div class="chat-input-area">
                 <div class="input-wrapper">
-                    <textarea id="userInput" placeholder="Ask your career strategy question..." rows="3"></textarea>
+                    <textarea id="userInput" placeholder="Ask your career strategy question..." rows="1"></textarea>
                     <button id="sendBtn" class="send-btn" title="Send message">
                         <i class="fas fa-paper-plane"></i>
                     </button>
@@ -58,26 +496,22 @@
         </aside>
     </div>
 
-    <!-- Footer -->
     <footer class="app-footer">
         <div class="footer-content">
             <div class="footer-left">
-                <p>&copy; 2025 ARC Career Strategist | Powered by Gemini AI</p>
+                <p>&copy; 2025 AI Powered Career Guidance Tool</p>
             </div>
             <div class="footer-center">
-                <p>Expert guidance based on the Refracted Economies Framework</p>
+                <p>AI guidance based on the Refracted Economies Framework</p>
             </div>
             <div class="footer-right">
                 <a href="#" class="footer-link">Privacy Policy</a>
                 <span class="footer-separator">|</span>
                 <a href="#" class="footer-link">Terms of Service</a>
-                <span class="footer-separator">|</span>
-                <a href="#" class="footer-link">Support</a>
             </div>
         </div>
     </footer>
 
-    <!-- Loading overlay for better UX -->
     <div id="loadingOverlay" class="loading-overlay" style="display: none;">
         <div class="loading-spinner">
             <div class="spinner"></div>

@@ -1,0 +1,85 @@
+source_entity,relationship_type,target_entity,source_document
+AI Automation,LEADS_TO,Robotics Engineer,Concept Note - AI Powered REF Career Guidance Tool.pdf
+AI Ethics Officer,PART_OF_INDUSTRY,Technology Governance,Concept Note - AI Powered REF Career Guidance Tool.pdf
+Artificial Intelligence,LEADS_TO,Agility,Concept Note - AI Powered REF Career Guidance Tool.pdf
+Artificial Intelligence,LEADS_TO,Creativity,Concept Note - AI Powered REF Career Guidance Tool.pdf
+Artificial Intelligence,LEADS_TO,Critical Thinking,Concept Note - AI Powered REF Career Guidance Tool.pdf
+Artificial Intelligence,LEADS_TO,Curiosity,Concept Note - AI Powered REF Career Guidance Tool.pdf
+Data Scientist,REQUIRES_SKILL,Python Programming,Concept Note - AI Powered REF Career Guidance Tool.pdf
+Financial Technology,INFLUENCED_BY,Blockchain Adoption,Concept Note - AI Powered REF Career Guidance Tool.pdf
+IoT-based monitoring,LEADS_TO,Ethiopia's Blue Economy,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+aquaculture,PART_OF_INDUSTRY,Ethiopia's Blue Economy,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+aquaculture technicians,PART_OF_INDUSTRY,aquaculture,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+boat mechanics,PART_OF_INDUSTRY,Ethiopia's Blue Economy,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+conservation,PART_OF_INDUSTRY,Ethiopia's Blue Economy,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+digital market platforms,LEADS_TO,Ethiopia's Blue Economy,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+engineers,PART_OF_INDUSTRY,hydropower sector,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+fisheries,PART_OF_INDUSTRY,Ethiopia's Blue Economy,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+fisheries management,PART_OF_INDUSTRY,Ethiopia's Blue Economy,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+fish processing specialists,PART_OF_INDUSTRY,Ethiopia's Blue Economy,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+hatchery managers,PART_OF_INDUSTRY,aquaculture,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+hydropower sector,PART_OF_INDUSTRY,Ethiopia's Blue Economy,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+remote sensing,LEADS_TO,Ethiopia's Blue Economy,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+technicians,PART_OF_INDUSTRY,hydropower sector,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+tourism,PART_OF_INDUSTRY,Ethiopia's Blue Economy,Ethiopia Colour Coded Analysis 25-26 June 2025.pdf
+Coastal and Marine Tourism,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Community-led Roles,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Conservation,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Digital Skills,Skill,REQUIRES_SKILL,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Ecotourism,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Fisheries,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Freelance Consultancy,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Green Technologies,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Marine Data Science,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Marine Data Science,PART_OF_INDUSTRY,Maritime Automation,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Marine Data Science,Skill,REQUIRES_SKILL,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Marine Data Science,PART_OF_INDUSTRY,Smart Ports,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Marine Data Science,PART_OF_INDUSTRY,Sustainable Aquaculture,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Maritime Automation,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Maritime Automation,Skill,REQUIRES_SKILL,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Maritime Automation,PART_OF_INDUSTRY,Smart Ports,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Maritime Transport,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Offshore Oil and Gas,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Ports,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Project-based Contracts,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Research,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Smart Ports,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Sustainable Aquaculture,PART_OF_INDUSTRY,Blue Economy,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Technical Skills,Skill,REQUIRES_SKILL,Ghana Colour Coded Analysis 25-26 June 2025.pdf
+Blue Economy,INFLUENCED_BY,Blue Economy Master Plan,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+Blue Economy,INFLUENCED_BY,Bottom-Up Economic Transformation Agenda (BETA),Kenya Colour Coded Analysis 25-26 June 2025.pdf
+Blue Economy,INFLUENCED_BY,Constitution of Kenya 2010,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+Blue Economy,PART_OF_INDUSTRY,Kenya,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+Blue Economy,INFLUENCED_BY,Kenya Vision 2030,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+Blue Economy,INFLUENCED_BY,National Blue Economy Strategy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+aquaculture farmers,PART_OF_INDUSTRY,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+artisanal fishers,PART_OF_INDUSTRY,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+environmental impact assessment,LEADS_TO,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+fisheries,PART_OF_INDUSTRY,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+green technologies,LEADS_TO,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+mariculture,LEADS_TO,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+maritime transport,PART_OF_INDUSTRY,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+mineral resources,PART_OF_INDUSTRY,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+processing plant technicians,PART_OF_INDUSTRY,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+quality assurance officers,PART_OF_INDUSTRY,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+renewable energy,PART_OF_INDUSTRY,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+sustainable resource management,LEADS_TO,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+tourism,PART_OF_INDUSTRY,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+tourism enterprises,PART_OF_INDUSTRY,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+vessel crews,PART_OF_INDUSTRY,Blue Economy,Kenya Colour Coded Analysis 25-26 June 2025.pdf
+Public Universities,INFLUENCED_BY,Kenya Universities and Colleges Central Placement Service (KUCCPS),Kenya Higher Education Prerequisites_.pdf
+Technical and Vocational Education and Training (TVET) institutions,INFLUENCED_BY,Technical and Vocational Education and Training Authority (TVETA),Kenya Higher Education Prerequisites_.pdf
+Aquaculture,PART_OF_INDUSTRY,Blue Economy,Senegal Colour Coded Analysis 25-26 June 2025.pdf
+Artisanal Fishing,PART_OF_INDUSTRY,Blue Economy,Senegal Colour Coded Analysis 25-26 June 2025.pdf
+Autonomous Port of Dakar (Port Autonome de Dakar - PAD),PART_OF_INDUSTRY,Maritime Transport,Senegal Colour Coded Analysis 25-26 June 2025.pdf
+Direction of Environment and Classified Establishments (Direction de l'Environnement et des Établissements Classés - DEEC),PART_OF_INDUSTRY,Blue Economy,Senegal Colour Coded Analysis 25-26 June 2025.pdf
+National Agency for Maritime Affairs (Agence Nationale des Affaires Maritimes - ANAM),PART_OF_INDUSTRY,"Ministry of Fisheries, Maritime, and Port Infrastructures (MPEMIP)",Senegal Colour Coded Analysis 25-26 June 2025.pdf
+National Aquaculture Agency (Agence Nationale de l'Aquaculture - ANA),PART_OF_INDUSTRY,"Ministry of Fisheries, Maritime, and Port Infrastructures (MPEMIP)",Senegal Colour Coded Analysis 25-26 June 2025.pdf
+PETROSEN (Société des Pétroles du Sénégal),PART_OF_INDUSTRY,Offshore Energy,Senegal Colour Coded Analysis 25-26 June 2025.pdf
+Plan Sénégal Émergent (PSE),INFLUENCED_BY,Blue Economy,Senegal Colour Coded Analysis 25-26 June 2025.pdf
+Senegalese Shippers' Council (Conseil Sénégalais des Chargeurs - COSEC),PART_OF_INDUSTRY,Maritime Transport,Senegal Colour Coded Analysis 25-26 June 2025.pdf
+VISION SÉNÉGAL 2050 - Stratégie nationale de Développement 2025 -2029,INFLUENCED_BY,Blue Economy,Senegal Colour Coded Analysis 25-26 June 2025.pdf
+Data Science,LEADS_TO,Aquaculture,South Africa Colour Coded Analysis 25-26 June 2025.pdf
+Marine Robotics,LEADS_TO,Aquaculture,South Africa Colour Coded Analysis 25-26 June 2025.pdf
+Port Operations,PART_OF_INDUSTRY,Marine Transport,South Africa Colour Coded Analysis 25-26 June 2025.pdf
+Architectural Design,REQUIRES_SKILL,Design,South African Higher Education Prerequisites_.pdf

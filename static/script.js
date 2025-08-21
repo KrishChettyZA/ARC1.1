@@ -1,23 +1,38 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // --- Element Selectors ---
     const chatMessages = document.getElementById('chatMessages');
     const userInput = document.getElementById('userInput');
     const sendBtn = document.getElementById('sendBtn');
     const newChatBtn = document.getElementById('newChatBtn');
     const sessionList = document.getElementById('sessionList');
-    const referencesPanel = document.getElementById('referencesPanel');
     const referencesContent = document.getElementById('referencesContent');
     const citationCountSpan = document.getElementById('citationCount');
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    const sidebar = document.getElementById('sidebar');
+    const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
+    const toggleIcon = toggleSidebarBtn.querySelector('i');
+    const referencesPanel = document.getElementById('referencesPanel');
+
+    // --- Mobile Specific Elements ---
+    const mobileHistoryBtn = document.getElementById('mobileHistoryBtn');
+    const mobileReferencesBtn = document.getElementById('mobileReferencesBtn');
+    const overlayBackdrop = document.getElementById('overlayBackdrop');
+
 
     let currentSessionId = null;
-    let isLoading = false; // To prevent multiple sends
-    // Removed currentCitationMap since we restart from 1 for each response
+    let isLoading = false;
+    const messageCitationsMap = new Map();
 
-    // Function to generate a unique session ID
+    // --- Core Functions ---
+
     function generateSessionId() {
         return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
+    
+    function generateMessageId() {
+        return 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
 
-    // Function to save current chat state to local storage (for robust session handling)
     function saveCurrentSessionId(sessionId) {
         localStorage.setItem('currentSessionId', sessionId);
     }
@@ -25,402 +40,248 @@ document.addEventListener('DOMContentLoaded', () => {
     function getSavedSessionId() {
         return localStorage.getItem('currentSessionId');
     }
+    
+    function getInitialSessionId() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionFromUrl = urlParams.get('session');
+        if (sessionFromUrl) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return sessionFromUrl;
+        }
+        return getSavedSessionId();
+    }
 
-    // Function to render a message in the chat
-    function addMessage(sender, text, citations = [], shouldRenumberCitations = false) {
+    function formatMessageWithCitations(text) {
+        const rawHtml = marked.parse(text);
+        return rawHtml.replace(/\[(\d+)\]/g, (match, citationNumber) => {
+            return ` <a href="#" class="citation-link" data-citation-id="${citationNumber}"><sup>[${citationNumber}]</sup></a>`;
+        });
+    }
+
+    function addMessage(sender, text, citations = [], messageId = null) {
+        const newId = messageId || generateMessageId();
         const messageElement = document.createElement('div');
         messageElement.classList.add('chat-message', `${sender}-message`);
+        messageElement.id = newId;
 
         const messageBubble = document.createElement('div');
         messageBubble.classList.add('message-bubble');
-
-        let finalText = text;
-        let finalCitations = citations;
-
-        // Renumber citations if this is a new bot response (not loading from history)
-        if (shouldRenumberCitations && sender === 'bot' && citations.length > 0) {
-            const result = renumberCitationsForSession(citations, text);
-            finalText = result.updatedMessageText;
-            finalCitations = result.renumberedCitations;
-        }
-
-        // Basic Markdown parsing (for bold, italics, lists, headings, and citations)
-        let formattedText = finalText
-            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
-            .replace(/\*(.*?)\*/g, '<em>$1</em>')             // Italics
-            .replace(/^- (.*)/gm, '<li>$1</li>')              // Unordered list items
-            .replace(/^(\d+)\. (.*)/gm, '<li>$1. $2</li>');   // Ordered list items
         
-        // Wrap lists with <ul> or <ol>
-        formattedText = formattedText.replace(/(<li>.*?<\/li>(\s*<li>.*?<\/li>)*)/gs, (match) => {
-            const lines = match.split('<li>').filter(line => line.trim() !== '');
-            if (lines.every(line => /^\d+\./.test(line.trim()))) {
-                return `<ol>${match}</ol>`;
+        if (sender === 'bot') {
+            messageBubble.innerHTML = formatMessageWithCitations(text);
+            if (citations.length > 0) {
+                messageCitationsMap.set(newId, citations);
             }
-            return `<ul>${match}</ul>`;
-        });
-
-        // Basic heading parsing (e.g., ## Heading)
-        formattedText = formattedText.replace(/^### (.*)/gm, '<h3>$1</h3>');
-        formattedText = formattedText.replace(/^## (.*)/gm, '<h2>$1</h2>');
-        formattedText = formattedText.replace(/^# (.*)/gm, '<h1>$1</h1>');
-
-        // Enhanced citation processing with proper superscript formatting
-        if (finalCitations && finalCitations.length > 0) {
-            // Process both [^1] and [1] citation formats and convert to proper superscripts
-            finalCitations.forEach(citation => {
-                // Handle [^1] format (preferred backend format)
-                const caretRegex = new RegExp(`\\[\\^${citation.id}\\]`, 'g');
-                formattedText = formattedText.replace(caretRegex, 
-                    `<sup class="citation-link" data-citation-id="${citation.id}">${citation.id}</sup>`);
-                
-                // Handle [1] format (alternative format)
-                const bracketRegex = new RegExp(`\\[${citation.id}\\]`, 'g');
-                formattedText = formattedText.replace(bracketRegex, 
-                    `<sup class="citation-link" data-citation-id="${citation.id}">${citation.id}</sup>`);
-            });
-            
-            // Also handle any remaining citation patterns that might not match exactly
-            formattedText = formattedText.replace(/\[\^(\d+)\]/g, 
-                (match, num) => {
-                    // Check if this citation ID exists in our citations array
-                    const citationExists = finalCitations.some(c => c.id == num);
-                    if (citationExists) {
-                        return `<sup class="citation-link" data-citation-id="${num}">${num}</sup>`;
-                    }
-                    return match; // Return unchanged if citation doesn't exist
-                });
+        } else {
+            messageBubble.textContent = text;
         }
-
-        messageBubble.innerHTML = formattedText;
+        
         messageElement.appendChild(messageBubble);
-        
-        // Store the final citations on the message element for later use
-        messageElement.finalCitations = finalCitations;
-        messageElement.finalText = finalText;
-        
         chatMessages.appendChild(messageElement);
-        chatMessages.scrollTop = chatMessages.scrollHeight; // Auto-scroll to latest message
-        
-        return { finalCitations, finalText };
-    }
+        chatMessages.scrollTop = chatMessages.scrollHeight;
 
-    // Function to renumber citations for the current session - RESTART FROM 1 FOR EACH RESPONSE
-    function renumberCitationsForSession(citations, messageText) {
-        if (!citations || citations.length === 0) {
-            return { renumberedCitations: [], updatedMessageText: messageText };
+        if (sender === 'bot') {
+            displayCitations(citations);
         }
-
-        // Find which citations are actually referenced
-        const referencedCitations = findReferencedCitations(messageText, citations);
-        if (referencedCitations.length === 0) {
-            return { renumberedCitations: [], updatedMessageText: messageText };
-        }
-
-        // Always start from 1 for each new response
-        let newCitationNumber = 1;
-        
-        const renumberedCitations = [];
-        let updatedMessageText = messageText;
-
-        // Sort referenced citations by their original ID to maintain consistent order
-        const sortedReferencedCitations = referencedCitations.sort((a, b) => parseInt(a.id) - parseInt(b.id));
-
-        sortedReferencedCitations.forEach(citation => {
-            const originalId = parseInt(citation.id);
-            const newId = newCitationNumber;
-            
-            // Create new citation with renumbered ID
-            const renumberedCitation = {
-                ...citation,
-                id: newId.toString()
-            };
-            renumberedCitations.push(renumberedCitation);
-
-            // Update all occurrences in the message text
-            const citationPatterns = [
-                new RegExp(`\\[\\^${originalId}\\]`, 'g'),  // [^1] format
-                new RegExp(`\\[${originalId}\\]`, 'g'),     // [1] format
-                new RegExp(`\\^${originalId}(?!\\d)`, 'g')  // ^1 format (not followed by digit)
-            ];
-
-            citationPatterns.forEach(pattern => {
-                updatedMessageText = updatedMessageText.replace(pattern, `[^${newId}]`);
-            });
-
-            newCitationNumber++;
-        });
-
-        return { renumberedCitations, updatedMessageText };
+        return messageElement;
     }
-    function findReferencedCitations(messageText, allCitations) {
-        if (!messageText || !allCitations || allCitations.length === 0) {
-            return [];
-        }
+    
+    function displayCitations(citations) {
+        referencesContent.innerHTML = '';
+        citationCountSpan.textContent = `(${citations.length})`;
 
-        const referencedCitations = [];
-        const citationIds = new Set();
-
-        // Look for citation patterns in the text - more comprehensive search
-        const citationPatterns = [
-            /\[\^(\d+)\]/g,  // [^1] format
-            /\[(\d+)\]/g,    // [1] format
-            /\^(\d+)/g       // ^1 format (without brackets)
-        ];
-
-        citationPatterns.forEach(pattern => {
-            // Reset regex lastIndex to ensure proper matching
-            pattern.lastIndex = 0;
-            let match;
-            while ((match = pattern.exec(messageText)) !== null) {
-                const citationId = parseInt(match[1]);
-                if (!isNaN(citationId)) {
-                    citationIds.add(citationId);
-                }
-            }
-        });
-
-        // Filter citations to only include those that are actually referenced
-        allCitations.forEach(citation => {
-            const citationIdNum = parseInt(citation.id);
-            if (citationIds.has(citationIdNum)) {
-                referencedCitations.push(citation);
-            }
-        });
-
-        // Sort by citation ID to maintain order
-        return referencedCitations.sort((a, b) => parseInt(a.id) - parseInt(b.id));
-    }
-
-    // Function to display citations in the references panel - ONLY cited ones
-    function displayCitations(citations, messageText = '') {
-        referencesContent.innerHTML = ''; // Clear previous citations
-
-        // Only show citations that are actually referenced in the message
-        const referencedCitations = messageText ? 
-            findReferencedCitations(messageText, citations) : 
-            [];
-
-        citationCountSpan.textContent = `(${referencedCitations.length})`;
-
-        if (referencedCitations.length === 0) {
+        if (citations.length === 0) {
             referencesContent.innerHTML = '<p class="no-references">Citations for responses will appear here.</p>';
             return;
         }
 
-        referencedCitations.forEach(citation => {
+        citations.forEach(citation => {
             const citationItem = document.createElement('div');
             citationItem.classList.add('reference-item');
             citationItem.setAttribute('data-citation-id', citation.id);
 
-            // Truncate content if too long for display
-            const truncatedContent = citation.content.length > 300 
-                ? citation.content.substring(0, 300) + '...' 
-                : citation.content;
+            const tempDiv = document.createElement('div');
+            tempDiv.textContent = citation.content;
+            const sanitizedContent = tempDiv.innerHTML;
 
+            const truncatedContent = sanitizedContent.length > 300 
+                ? sanitizedContent.substring(0, 300) + '...' 
+                : sanitizedContent;
+            
             citationItem.innerHTML = `
                 <h3>
                     <span class="ref-id">${citation.id}</span> 
-                    <span class="ref-source">${citation.source}</span>
+                    <span class="ref-source">${citation.source || 'Unknown Source'}</span>
                 </h3>
-                <p class="ref-page">${citation.page_number}</p>
-                <div class="ref-content">${truncatedContent}</div>
-                <a href="/api/pdf/${encodeURIComponent(citation.source)}" target="_blank" class="view-pdf-btn">
+                <p class="ref-page">${citation.page_number ? `Detail: ${citation.page_number}` : ''}</p>
+                <div class="ref-content">${truncatedContent.replace(/\n/g, '<br>')}</div>
+                ${citation.source ? `<a href="/documents/${encodeURIComponent(citation.source)}" target="_blank" class="view-pdf-btn">
                     <i class="fas fa-file-pdf"></i> View PDF
-                </a>
+                </a>` : ''}
             `;
             referencesContent.appendChild(citationItem);
         });
-
-        // Add click listeners to citation links in chat messages
-        setTimeout(() => {
-            document.querySelectorAll('.citation-link').forEach(link => {
-                link.removeEventListener('click', handleCitationClick);
-                link.addEventListener('click', handleCitationClick);
-            });
-        }, 100);
     }
-
+    
     function handleCitationClick(event) {
+        const link = event.target.closest('.citation-link');
+        if (!link) return;
+
         event.preventDefault();
-        const citationId = event.target.dataset.citationId;
-        const referenceItem = document.querySelector(`.references-panel .reference-item[data-citation-id="${citationId}"]`);
-        if (referenceItem) {
-            // Scroll to the reference item
-            referencesContent.scrollTo({
-                top: referenceItem.offsetTop - referencesContent.offsetTop,
-                behavior: 'smooth'
-            });
-            // Briefly highlight the item
-            referenceItem.style.transition = 'background-color 0.5s ease-in-out';
-            referenceItem.style.backgroundColor = '#e0f7fa'; // Light blue highlight
-            setTimeout(() => {
-                referenceItem.style.backgroundColor = ''; // Revert to original
-            }, 1500);
+        const citationId = link.dataset.citationId;
+        const messageElement = link.closest('.chat-message');
+        if (!citationId || !messageElement) return;
+
+        const messageId = messageElement.id;
+        const relevantCitations = messageCitationsMap.get(messageId);
+
+        if (relevantCitations) {
+            displayCitations(relevantCitations);
+            const referenceItem = document.querySelector(`.references-panel .reference-item[data-citation-id="${citationId}"]`);
+            if (referenceItem) {
+                referenceItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                document.querySelectorAll('.reference-item.highlight').forEach(item => item.classList.remove('highlight'));
+                referenceItem.classList.add('highlight');
+                setTimeout(() => {
+                    referenceItem.classList.remove('highlight');
+                }, 2000);
+            }
         }
     }
 
-    // Function to show/hide loading indicator
-    function showLoadingIndicator() {
-        const loadingElement = document.createElement('div');
-        loadingElement.classList.add('chat-message', 'bot-message', 'loading-indicator');
-        loadingElement.innerHTML = `
-            <div class="message-bubble">
-                <div class="loading-dots">
-                    <span></span><span></span><span></span>
-                </div>
-            </div>
-        `;
-        chatMessages.appendChild(loadingElement);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-
-    function hideLoadingIndicator() {
-        const loadingElement = chatMessages.querySelector('.loading-indicator');
-        if (loadingElement) {
-            loadingElement.remove();
-        }
-    }
-
-    // Function to send message to backend
-    async function sendMessage() {
-        const message = userInput.value.trim();
-        if (message === '' || isLoading) {
-            return;
-        }
-
+    function showLoading() {
         isLoading = true;
         sendBtn.disabled = true;
         userInput.disabled = true;
-        
-        addMessage('user', message);
-        userInput.value = ''; // Clear input field
+    }
 
-        showLoadingIndicator();
+    function hideLoading() {
+        isLoading = false;
+        sendBtn.disabled = false;
+        userInput.disabled = false;
+        userInput.focus();
+    }
+    
+    async function sendMessage() {
+        const message = userInput.value.trim();
+        if (message === '' || isLoading) return;
+
+        addMessage('user', message);
+        userInput.value = '';
+        showLoading();
+
+        const botMessageElement = addMessage('bot', '');
+        const messageBubble = botMessageElement.querySelector('.message-bubble');
+        let fullResponseText = "";
 
         try {
             const response = await fetch('/api/chat', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: message, session_id: currentSessionId }),
             });
 
-            const data = await response.json();
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
 
-            hideLoadingIndicator();
-
-            if (data.success) {
-                const result = addMessage('bot', data.response, data.citations, true); // true = renumber citations
-                displayCitations(result.finalCitations, result.finalText);
-                // Update session preview in sidebar for the current session
-                updateSessionPreview(currentSessionId, message);
-            } else {
-                addMessage('bot', data.response || 'An error occurred.');
-                displayCitations([]); // Clear citations on error
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                
+                const chunk = decoder.decode(value, { stream: true });
+                const events = chunk.split('\n\n');
+                
+                for (const event of events) {
+                    if (event.startsWith('data:')) {
+                        const dataStr = event.substring(5);
+                        try {
+                            const data = JSON.parse(dataStr);
+                            if (data.type === 'citations') {
+                                const citations = data.payload;
+                                messageCitationsMap.set(botMessageElement.id, citations);
+                                displayCitations(citations);
+                            } else if (data.type === 'text') {
+                                fullResponseText += data.payload;
+                                messageBubble.innerHTML = formatMessageWithCitations(fullResponseText);
+                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                            } else if (data.type === 'error') {
+                                messageBubble.innerHTML = `<p class="error">${data.payload}</p>`;
+                            }
+                        } catch (e) {
+                            // Ignore incomplete JSON chunks
+                        }
+                    }
+                }
             }
+            updateSessionPreview(currentSessionId, message);
+
         } catch (error) {
-            hideLoadingIndicator();
-            console.error('Error:', error);
-            addMessage('bot', 'Sorry, I am unable to connect to the server. Please try again later.');
-            displayCitations([]); // Clear citations on network error
+            console.error('Error sending message:', error);
+            messageBubble.innerHTML = 'Sorry, I am unable to connect to the server. Please try again later.';
         } finally {
-            isLoading = false;
-            sendBtn.disabled = false;
-            userInput.disabled = false;
-            userInput.focus();
+            hideLoading();
         }
     }
-
-    // Event Listeners
-    sendBtn.addEventListener('click', sendMessage);
-    userInput.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault(); // Prevent new line
-            sendMessage();
-        }
-    });
-
-    newChatBtn.addEventListener('click', startNewChat);
-
-    // --- Session Management Functions ---
 
     function startNewChat() {
         currentSessionId = generateSessionId();
         saveCurrentSessionId(currentSessionId);
+        messageCitationsMap.clear();
         
         chatMessages.innerHTML = `
             <div class="chat-message bot-message intro-message">
                 <div class="message-bubble">
-                    Hello! I am the **ARC Principal Career Strategist**, an expert on the Refracted Economies Framework. I'm here to provide detailed, comprehensive, and strategic career guidance. How can I assist you today?
+                    Hello! I am the <strong>AI Powered Career Guidance Tool</strong>, an expert on the Refracted Economies Framework. I'm here to provide detailed, comprehensive, and strategic career guidance. How can I assist you today?
                 </div>
             </div>
         `;
-        displayCitations([], ''); // Clear citations for a new chat
+        displayCitations([]);
         userInput.value = '';
-        listSessions(); // Refresh session list to show new chat
+        listSessions();
         updateActiveSessionUI();
         userInput.focus();
     }
 
     async function loadSession(sessionId) {
-        if (isLoading) return; // Prevent switching while loading
-
-        currentSessionId = sessionId;
-        saveCurrentSessionId(currentSessionId);
+        if (isLoading || !sessionId) return;
         
-        chatMessages.innerHTML = ''; // Clear current messages
-        displayCitations([]); // Clear citations until loaded
-
-        showLoadingIndicator(); // Show loading for history
-        isLoading = true;
-        sendBtn.disabled = true;
-        userInput.disabled = true;
-
+        showLoading(true);
+        loadingOverlay.style.display = 'flex';
+        currentSessionId = sessionId;
+        saveCurrentSessionId(sessionId);
+        chatMessages.innerHTML = '';
+        messageCitationsMap.clear();
+        
         try {
             const response = await fetch(`/api/history?session_id=${sessionId}`);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             const data = await response.json();
 
-            hideLoadingIndicator();
-
             if (data.success && data.history) {
-                let lastCitations = [];
-                let lastResponseText = '';
-                
+                let lastBotCitations = [];
                 data.history.forEach(turn => {
-                    // Ensure 'parts' and 'citations' exist for compatibility
-                    const messageText = (turn.parts && turn.parts[0]) || '';
-                    const messageCitations = turn.citations || [];
-                    
-                    if (turn.role === 'model' && messageCitations.length > 0) {
-                        // Renumber citations when loading from history (restart from 1 for each response)
-                        const result = addMessage(turn.role, messageText, messageCitations, true);
-                        lastCitations = result.finalCitations;
-                        lastResponseText = result.finalText;
-                    } else {
-                        addMessage(turn.role, messageText, messageCitations, false);
-                        if (turn.role === 'model') {
-                            lastCitations = messageCitations;
-                            lastResponseText = messageText;
+                    if (turn.role === 'user' || turn.role === 'model') {
+                        const messageText = (turn.parts && turn.parts[0]) || '';
+                        const messageCitations = Array.isArray(turn.citations) ? turn.citations : [];
+                        const sender = turn.role === 'user' ? 'user' : 'bot';
+                        addMessage(sender, messageText, messageCitations);
+                        if (sender === 'bot') {
+                            lastBotCitations = messageCitations;
                         }
                     }
                 });
-                
-                // Display only the cited citations from the last model message
-                displayCitations(lastCitations, lastResponseText);
+                displayCitations(lastBotCitations);
             } else {
                 addMessage('bot', 'Failed to load chat history.');
             }
         } catch (error) {
-            hideLoadingIndicator();
             console.error('Error loading history:', error);
             addMessage('bot', 'Failed to load chat history due to a network error.');
         } finally {
-            isLoading = false;
-            sendBtn.disabled = false;
-            userInput.disabled = false;
-            userInput.focus();
+            hideLoading();
+            loadingOverlay.style.display = 'none';
             updateActiveSessionUI();
         }
     }
@@ -428,182 +289,141 @@ document.addEventListener('DOMContentLoaded', () => {
     async function listSessions() {
         try {
             const response = await fetch('/api/sessions');
+            if (!response.ok) throw new Error('Failed to fetch sessions');
             const data = await response.json();
 
-            if (data.success) {
-                sessionList.innerHTML = ''; // Clear existing list
-                if (data.sessions.length === 0) {
-                    sessionList.innerHTML = '<li class="no-sessions-msg">No past sessions. Start a new chat!</li>';
-                    return;
-                }
+            sessionList.innerHTML = '';
+            if (data.success && data.sessions.length > 0) {
                 data.sessions.forEach(session => {
-                    const listItem = document.createElement('li');
-                    listItem.classList.add('session-item');
-                    listItem.dataset.sessionId = session.id;
-                    
-                    // Create session item with menu button (3 dots)
-                    listItem.innerHTML = `
-                        <span class="session-item-text">${session.preview}</span>
-                        <div class="session-menu">
-                            <button class="session-menu-btn" title="Session Options">
-                                <i class="fas fa-ellipsis-v"></i>
-                            </button>
-                            <div class="session-menu-dropdown" style="display: none;">
-                                <button class="menu-option rename-btn">
-                                    <i class="fas fa-edit"></i> Rename
-                                </button>
-                                <button class="menu-option new-tab-btn">
-                                    <i class="fas fa-external-link-alt"></i> New Tab
-                                </button>
-                                <button class="menu-option delete-btn">
-                                    <i class="fas fa-trash-alt"></i> Delete
-                                </button>
-                            </div>
-                        </div>
-                    `;
-                    
-                    // Add event listener for session loading
-                    listItem.querySelector('.session-item-text').addEventListener('click', () => {
-                        loadSession(session.id);
-                    });
-                    
-                    // Add event listener for menu button
-                    const menuBtn = listItem.querySelector('.session-menu-btn');
-                    const menuDropdown = listItem.querySelector('.session-menu-dropdown');
-                    
-                    menuBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        // Hide other open menus
-                        document.querySelectorAll('.session-menu-dropdown').forEach(dropdown => {
-                            if (dropdown !== menuDropdown) {
-                                dropdown.style.display = 'none';
-                            }
-                        });
-                        // Toggle current menu
-                        menuDropdown.style.display = menuDropdown.style.display === 'none' ? 'block' : 'none';
-                    });
-                    
-                    // Add event listeners for menu options
-                    listItem.querySelector('.rename-btn').addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        renameSession(session.id, listItem);
-                        menuDropdown.style.display = 'none';
-                    });
-                    
-                    listItem.querySelector('.new-tab-btn').addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        openSessionInNewTab(session.id);
-                        menuDropdown.style.display = 'none';
-                    });
-                    
-                    listItem.querySelector('.delete-btn').addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        deleteSession(session.id);
-                        menuDropdown.style.display = 'none';
-                    });
-                    
+                    const listItem = createSessionListItem(session);
                     sessionList.appendChild(listItem);
                 });
-                
-                updateActiveSessionUI(); // Highlight active session after rendering
             } else {
-                console.error('Failed to list sessions:', data.message);
+                sessionList.innerHTML = '<li class="no-sessions-msg">No past sessions found.</li>';
             }
         } catch (error) {
             console.error('Error fetching sessions:', error);
+            sessionList.innerHTML = '<li class="no-sessions-msg">Could not load sessions.</li>';
         }
-        
-        // Close menu dropdowns when clicking outside
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('.session-menu')) {
-                document.querySelectorAll('.session-menu-dropdown').forEach(dropdown => {
-                    dropdown.style.display = 'none';
-                });
-            }
+        updateActiveSessionUI();
+    }
+    
+    function createSessionListItem(session) {
+        const listItem = document.createElement('li');
+        listItem.classList.add('session-item');
+        listItem.dataset.sessionId = session.id;
+        listItem.innerHTML = `
+            <span class="session-item-text">${session.preview}</span>
+            <div class="session-menu">
+                <button class="session-menu-btn" title="Session Options"><i class="fas fa-ellipsis-v"></i></button>
+                <div class="session-menu-dropdown" style="display: none;">
+                    <button class="menu-option delete-btn"><i class="fas fa-trash-alt"></i> Delete</button>
+                </div>
+            </div>
+        `;
+        listItem.querySelector('.session-item-text').addEventListener('click', () => loadSession(session.id));
+        const menuBtn = listItem.querySelector('.session-menu-btn');
+        const menuDropdown = listItem.querySelector('.session-menu-dropdown');
+        menuBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            document.querySelectorAll('.session-menu-dropdown').forEach(d => { if (d !== menuDropdown) d.style.display = 'none'; });
+            menuDropdown.style.display = menuDropdown.style.display === 'none' ? 'block' : 'none';
         });
+        listItem.querySelector('.delete-btn').addEventListener('click', e => { e.stopPropagation(); deleteSession(session.id); });
+        
+        return listItem;
     }
 
     async function deleteSession(sessionId) {
-        if (!confirm('Are you sure you want to delete this chat session?')) {
-            return;
-        }
-
+        if (!window.confirm('Are you sure you want to delete this chat session? This cannot be undone.')) return;
         try {
-            const response = await fetch(`/api/delete_session/${sessionId}`, {
-                method: 'DELETE',
-            });
+            const response = await fetch(`/api/delete_session/${sessionId}`, { method: 'DELETE' });
             const data = await response.json();
-
             if (data.success) {
-                console.log(data.message);
-                listSessions(); // Refresh list
                 if (currentSessionId === sessionId) {
-                    // If deleted session was active, start a new chat
                     startNewChat();
                 }
+                listSessions();
             } else {
-                console.error('Failed to delete session:', data.message);
                 alert('Failed to delete session: ' + (data.message || 'Unknown error.'));
             }
         } catch (error) {
             console.error('Error deleting session:', error);
-            alert('Error deleting session due to network issue.');
+            alert('An error occurred while deleting the session.');
         }
     }
-
-    // Function to update the active session's UI in the sidebar
+    
     function updateActiveSessionUI() {
         document.querySelectorAll('.session-item').forEach(item => {
-            if (item.dataset.sessionId === currentSessionId) {
-                item.classList.add('active');
-            } else {
-                item.classList.remove('active');
-            }
+            item.classList.toggle('active', item.dataset.sessionId === currentSessionId);
         });
     }
 
     function updateSessionPreview(sessionId, latestUserMessage) {
-        const sessionItem = document.querySelector(`.session-item[data-session-id="${sessionId}"]`);
-        if (sessionItem) {
-            const previewText = sessionItem.querySelector('.session-item-text');
-            if (previewText) {
-                // Update preview if it's still 'New Chat Session' or similar generic text
-                if (previewText.textContent === 'New Chat Session' || previewText.textContent.startsWith('Chat Session')) {
-                    const newPreview = latestUserMessage.substring(0, 50) + (latestUserMessage.length > 50 ? '...' : '');
-                    previewText.textContent = newPreview;
-                }
-            }
-            // Move the current session to the top of the list for better UX
-            sessionList.prepend(sessionItem);
+        let sessionItem = document.querySelector(`.session-item[data-session-id="${sessionId}"]`);
+        if (!sessionItem) {
+             listSessions(); 
+             return;
+        }
+        const previewText = sessionItem.querySelector('.session-item-text');
+        if (previewText && (previewText.textContent === 'New Chat Session' || !previewText.textContent)) {
+            previewText.textContent = latestUserMessage.substring(0, 50) + (latestUserMessage.length > 50 ? '...' : '');
+        }
+        sessionList.prepend(sessionItem);
+    }
+    
+    // --- Event Listeners & Initial Load ---
+    
+    sendBtn.addEventListener('click', sendMessage);
+    userInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            sendMessage();
+        }
+    });
+    newChatBtn.addEventListener('click', startNewChat);
+    
+    chatMessages.addEventListener('click', handleCitationClick);
+    
+    // Desktop sidebar toggle
+    toggleSidebarBtn.addEventListener('click', () => {
+        sidebar.classList.toggle('collapsed');
+        const isCollapsed = sidebar.classList.contains('collapsed');
+        toggleIcon.className = isCollapsed ? 'fas fa-chevron-right' : 'fas fa-chevron-left';
+    });
+
+    // **FIX:** Added event listeners for mobile panel toggles
+    mobileHistoryBtn.addEventListener('click', () => {
+        sidebar.classList.add('open');
+        overlayBackdrop.style.display = 'block';
+    });
+
+    mobileReferencesBtn.addEventListener('click', () => {
+        referencesPanel.classList.add('open');
+        overlayBackdrop.style.display = 'block';
+    });
+
+    overlayBackdrop.addEventListener('click', () => {
+        sidebar.classList.remove('open');
+        referencesPanel.classList.remove('open');
+        overlayBackdrop.style.display = 'none';
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.session-menu')) {
+            document.querySelectorAll('.session-menu-dropdown').forEach(d => d.style.display = 'none');
+        }
+    });
+
+    async function initializeApp() {
+        await listSessions();
+        const initialSessionId = getInitialSessionId();
+        if (initialSessionId) {
+            await loadSession(initialSessionId);
         } else {
-            // If the session item doesn't exist (e.g., first message in a new chat), refresh the list
-            listSessions();
+            startNewChat();
         }
     }
-
-    // New session management functions
-    function renameSession(sessionId, listItem) {
-        const currentText = listItem.querySelector('.session-item-text').textContent;
-        const newName = prompt('Enter new session name:', currentText);
-        if (newName && newName.trim() !== '' && newName !== currentText) {
-            listItem.querySelector('.session-item-text').textContent = newName.trim();
-            // Note: In a full implementation, you'd also save this to the backend
-            console.log(`Renamed session ${sessionId} to: ${newName}`);
-        }
-    }
-
-    function openSessionInNewTab(sessionId) {
-        const currentUrl = window.location.href;
-        const newTabUrl = currentUrl + (currentUrl.includes('?') ? '&' : '?') + `session=${sessionId}`;
-        window.open(newTabUrl, '_blank');
-    }
-
-    // --- Initial Load ---
-    const initialSessionId = getSavedSessionId();
-    if (initialSessionId) {
-        loadSession(initialSessionId);
-    } else {
-        startNewChat(); // Start a new chat if no saved session
-    }
-    listSessions(); // Always list sessions on page load
+    
+    initializeApp();
 });

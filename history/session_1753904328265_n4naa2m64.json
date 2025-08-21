@@ -1,0 +1,28 @@
+[
+  {
+    "role": "user",
+    "parts": [
+      "kg output"
+    ]
+  },
+  {
+    "role": "model",
+    "parts": [
+      "Successfully exported 256 entities to `knowledge_graph_entities.csv` and 84 relationships to `knowledge_graph_relationships.csv`."
+    ],
+    "citations": []
+  },
+  {
+    "role": "user",
+    "parts": [
+      "kg output"
+    ]
+  },
+  {
+    "role": "model",
+    "parts": [
+      "Successfully exported 256 entities to `knowledge_graph_entities.csv` and 84 relationships to `knowledge_graph_relationships.csv`."
+    ],
+    "citations": []
+  }
+]
