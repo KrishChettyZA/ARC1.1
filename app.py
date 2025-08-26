@@ -18,6 +18,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from typing import List, Dict, Any, Iterator
 import logging
 from datetime import datetime
+from pypdf import errors as pypdf_errors # --- ADDED IMPORT ---
 
 # --- Configure logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -61,7 +62,7 @@ class ApiKeyManager:
 
 # --- Configuration ---
 try:
-    MODEL_NAME = "gemini-2.0-flash"
+    MODEL_NAME = "gemini-2.0-flash" # Updated to a recommended model
     EMBEDDING_MODEL_NAME = "models/embedding-001"
     
     API_KEY_MANAGER = ApiKeyManager()
@@ -122,6 +123,7 @@ class GeminiEmbeddingFunction(chromadb.EmbeddingFunction):
                      raise e
         
         logging.error("⚠️ Embedding failed after all retries. Returning zero vectors.")
+        # Dimension for embedding-001 is 768
         return [[0.0] * 768 for _ in valid_input]
 
 
@@ -154,8 +156,6 @@ def setup_database_and_directories():
         except Exception as e:
             logging.error(f"❌ Could not delete collection '{collection_name}': {e}")
         
-        # FIX: Instead of deleting the folder, delete the files inside it.
-        # This is more resilient to file permission errors.
         if receipts_dir.exists():
             logging.info("  -> Deleting old processing receipts...")
             for receipt_file in receipts_dir.glob("*.receipt"):
@@ -203,7 +203,17 @@ def process_all_pdfs():
 
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=400)
     for pdf_file in pdf_files:
+        # --- MODIFICATION START: Add file size check and specific error handling ---
         try:
+            # Check if the file is too small to be a valid PDF (e.g., under 1 KB)
+            if pdf_file.stat().st_size < 1024:
+                logging.warning(
+                    f"📄 Skipping {pdf_file.name} because it is smaller than 1KB. "
+                    f"This might be a Git LFS pointer instead of the actual PDF file. "
+                    f"Please run 'git lfs pull' to download the file."
+                )
+                continue # Move to the next file
+
             receipt_file = RECEIPTS_DIRECTORY / f"{pdf_file.name}.receipt"
             if receipt_file.exists():
                 receipt_mtime = receipt_file.stat().st_mtime
@@ -230,9 +240,17 @@ def process_all_pdfs():
 
             receipt_file.touch()
             logging.info(f"  ✅ Created processing receipt for {pdf_file.name}")
-
+        
+        # Catch the specific error for corrupted PDFs or LFS pointers
+        except pypdf_errors.PdfStreamError as pse:
+            logging.error(
+                f"❌ Error processing {pdf_file.name}: {pse}. "
+                "The file may be corrupted or a Git LFS pointer. Please check the file."
+            )
+        # Catch any other unexpected errors
         except Exception as e:
-            logging.error(f"❌ Error processing {pdf_file.name}: {e}", exc_info=True)
+            logging.error(f"❌ An unexpected error occurred while processing {pdf_file.name}: {e}", exc_info=True)
+        # --- MODIFICATION END ---
     logging.info(f"\n🎉 PDF processing complete. Total items in collection: {COLLECTION.count()}")
 
 # --- Chat History and Logging ---
