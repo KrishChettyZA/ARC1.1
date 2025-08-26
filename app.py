@@ -18,7 +18,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from typing import List, Dict, Any, Iterator
 import logging
 from datetime import datetime
-from pypdf import errors as pypdf_errors # --- ADDED IMPORT ---
+from pypdf import errors as pypdf_errors
 
 # --- Configure logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -62,7 +62,7 @@ class ApiKeyManager:
 
 # --- Configuration ---
 try:
-    MODEL_NAME = "gemini-2.0-flash" # Updated to a recommended model
+    MODEL_NAME = "gemini-2.0-flash"
     EMBEDDING_MODEL_NAME = "models/embedding-001"
     
     API_KEY_MANAGER = ApiKeyManager()
@@ -203,7 +203,6 @@ def process_all_pdfs():
 
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=400)
     for pdf_file in pdf_files:
-        # --- MODIFICATION START: Add file size check and specific error handling ---
         try:
             # Check if the file is too small to be a valid PDF (e.g., under 1 KB)
             if pdf_file.stat().st_size < 1024:
@@ -241,16 +240,13 @@ def process_all_pdfs():
             receipt_file.touch()
             logging.info(f"  ✅ Created processing receipt for {pdf_file.name}")
         
-        # Catch the specific error for corrupted PDFs or LFS pointers
         except pypdf_errors.PdfStreamError as pse:
             logging.error(
                 f"❌ Error processing {pdf_file.name}: {pse}. "
                 "The file may be corrupted or a Git LFS pointer. Please check the file."
             )
-        # Catch any other unexpected errors
         except Exception as e:
             logging.error(f"❌ An unexpected error occurred while processing {pdf_file.name}: {e}", exc_info=True)
-        # --- MODIFICATION END ---
     logging.info(f"\n🎉 PDF processing complete. Total items in collection: {COLLECTION.count()}")
 
 # --- Chat History and Logging ---
@@ -415,11 +411,19 @@ def delete_session(session_id):
     return jsonify({"success": True})
 
 # --- Main Execution ---
+
+# Call the PDF processing function when the application starts.
+# This ensures it runs in both local development (python app.py)
+# and production environments (like Gunicorn on Render).
+process_all_pdfs()
+
+# The following block only runs when the script is executed directly
+# (i.e., `python app.py`), not when imported by a server like Gunicorn.
 if __name__ == '__main__':
+    # This route is useful for serving PDFs for citations during local testing.
     @app.route('/documents/<path:filename>')
     def serve_document(filename):
         return send_from_directory(PDF_DIRECTORY, filename, as_attachment=False)
-
-    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
-        process_all_pdfs()
+    
+    # This starts the Flask development server.
     app.run(host='0.0.0.0', port=5003, debug=True)
