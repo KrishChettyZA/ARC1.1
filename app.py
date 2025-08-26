@@ -204,14 +204,13 @@ def process_all_pdfs():
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=400)
     for pdf_file in pdf_files:
         try:
-            # Check if the file is too small to be a valid PDF (e.g., under 1 KB)
             if pdf_file.stat().st_size < 1024:
                 logging.warning(
                     f"📄 Skipping {pdf_file.name} because it is smaller than 1KB. "
                     f"This might be a Git LFS pointer instead of the actual PDF file. "
                     f"Please run 'git lfs pull' to download the file."
                 )
-                continue # Move to the next file
+                continue
 
             receipt_file = RECEIPTS_DIRECTORY / f"{pdf_file.name}.receipt"
             if receipt_file.exists():
@@ -410,20 +409,20 @@ def delete_session(session_id):
     (HISTORY_DIRECTORY / f"{session_id}.json").unlink(missing_ok=True)
     return jsonify({"success": True})
 
+# --- NEW LOCATION for the PDF serving route ---
+# This route allows the browser to fetch the PDF files for the reference links.
+# It's now outside the __name__ block so it works on Render.
+@app.route('/documents/<path:filename>')
+def serve_document(filename):
+    return send_from_directory(PDF_DIRECTORY, filename, as_attachment=False)
+
 # --- Main Execution ---
 
 # Call the PDF processing function when the application starts.
-# This ensures it runs in both local development (python app.py)
-# and production environments (like Gunicorn on Render).
 process_all_pdfs()
 
 # The following block only runs when the script is executed directly
 # (i.e., `python app.py`), not when imported by a server like Gunicorn.
 if __name__ == '__main__':
-    # This route is useful for serving PDFs for citations during local testing.
-    @app.route('/documents/<path:filename>')
-    def serve_document(filename):
-        return send_from_directory(PDF_DIRECTORY, filename, as_attachment=False)
-    
     # This starts the Flask development server.
     app.run(host='0.0.0.0', port=5003, debug=True)
