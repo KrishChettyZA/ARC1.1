@@ -12,35 +12,67 @@ document.addEventListener('DOMContentLoaded', () => {
     const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
     const toggleIcon = toggleSidebarBtn.querySelector('i');
     const referencesPanel = document.getElementById('referencesPanel');
+    const chatArea = document.querySelector('.chat-area'); // hero mode container
 
     // --- Mobile Specific Elements ---
     const mobileHistoryBtn = document.getElementById('mobileHistoryBtn');
     const mobileReferencesBtn = document.getElementById('mobileReferencesBtn');
     const overlayBackdrop = document.getElementById('overlayBackdrop');
 
+    // --- Auto-resize config ---
+    const MAX_INPUT_LINES = 10;
 
     let currentSessionId = null;
     let isLoading = false;
     const messageCitationsMap = new Map();
 
-    // --- Core Functions ---
+    // --- Helpers: autosize & reset textarea ---
+    function autosizeTextarea() {
+        const ta = userInput;
+        if (!ta) return;
 
+        const cs = getComputedStyle(ta);
+        const line = parseFloat(cs.lineHeight) || 20;
+        const min = parseFloat(cs.minHeight) || 44;
+        const max = line * MAX_INPUT_LINES;
+
+        ta.style.height = 'auto';
+        const newH = Math.max(Math.min(ta.scrollHeight, max), min);
+        ta.style.height = newH + 'px';
+        ta.style.overflowY = (ta.scrollHeight > max) ? 'auto' : 'hidden';
+    }
+
+    function resetTextarea() {
+        userInput.value = '';
+        userInput.style.height = '';
+        userInput.style.overflowY = 'hidden';
+    }
+
+    // --- Hero mode helpers ---
+    function enableHeroModeOnLoad() {
+        if (!chatArea) return;
+        if (window.matchMedia('(min-width: 769px)').matches) {
+            chatArea.classList.add('hero-mode');
+        }
+    }
+    function disableHeroMode() {
+        if (!chatArea) return;
+        chatArea.classList.remove('hero-mode');
+    }
+
+    // --- Core Functions ---
     function generateSessionId() {
         return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
-    
     function generateMessageId() {
         return 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
-
     function saveCurrentSessionId(sessionId) {
         localStorage.setItem('currentSessionId', sessionId);
     }
-
     function getSavedSessionId() {
         return localStorage.getItem('currentSessionId');
     }
-    
     function getInitialSessionId() {
         const urlParams = new URLSearchParams(window.location.search);
         const sessionFromUrl = urlParams.get('session');
@@ -53,8 +85,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function formatMessageWithCitations(text) {
         const rawHtml = marked.parse(text);
-        return rawHtml.replace(/\[(\d+)\]/g, (match, citationNumber) => {
-            return ` <a href="#" class="citation-link" data-citation-id="${citationNumber}"><sup>[${citationNumber}]</sup></a>`;
+        return rawHtml.replace(/\[([\d,\s]+)\]/g, (match, numbers) => {
+            const links = numbers.split(',')
+                                 .map(num => num.trim())
+                                 .filter(num => num)
+                                 .map(citationNumber => {
+                                     return `<a href="#" class="citation-link" data-citation-id="${citationNumber}"><sup>[${citationNumber}]</sup></a>`;
+                                 });
+            return ` ${links.join(', ')} `;
         });
     }
 
@@ -85,7 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return messageElement;
     }
-    
+
     function displayCitations(citations) {
         referencesContent.innerHTML = '';
         citationCountSpan.textContent = `(${citations.length})`;
@@ -114,7 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="ref-source">${citation.source || 'Unknown Source'}</span>
                 </h3>
                 <p class="ref-page">${citation.page_number ? `Detail: ${citation.page_number}` : ''}</p>
-                <div class="ref-content">${truncatedContent.replace(/\n/g, '<br>')}</div>
+                <div class="ref-content">${truncatedContent.replace(/\n/g, ' ')}</div>
                 ${citation.source ? `<a href="/documents/${encodeURIComponent(citation.source)}" target="_blank" class="view-pdf-btn">
                     <i class="fas fa-file-pdf"></i> View PDF
                 </a>` : ''}
@@ -122,7 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
             referencesContent.appendChild(citationItem);
         });
     }
-    
+
     function handleCitationClick(event) {
         const link = event.target.closest('.citation-link');
         if (!link) return;
@@ -142,9 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 referenceItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 document.querySelectorAll('.reference-item.highlight').forEach(item => item.classList.remove('highlight'));
                 referenceItem.classList.add('highlight');
-                setTimeout(() => {
-                    referenceItem.classList.remove('highlight');
-                }, 2000);
+                setTimeout(() => referenceItem.classList.remove('highlight'), 2000);
             }
         }
     }
@@ -161,13 +197,14 @@ document.addEventListener('DOMContentLoaded', () => {
         userInput.disabled = false;
         userInput.focus();
     }
-    
+
     async function sendMessage() {
         const message = userInput.value.trim();
         if (message === '' || isLoading) return;
 
+        disableHeroMode();
         addMessage('user', message);
-        userInput.value = '';
+        resetTextarea();
         showLoading();
 
         const botMessageElement = addMessage('bot', '');
@@ -180,22 +217,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: message, session_id: currentSessionId }),
             });
-
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            
+
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
+            let buffer = '';
 
             while (true) {
                 const { value, done } = await reader.read();
                 if (done) break;
-                
-                const chunk = decoder.decode(value, { stream: true });
-                const events = chunk.split('\n\n');
-                
-                for (const event of events) {
-                    if (event.startsWith('data:')) {
-                        const dataStr = event.substring(5);
+
+                buffer += decoder.decode(value, { stream: true });
+                let eventEndIndex;
+
+                while ((eventEndIndex = buffer.indexOf('\n\n')) >= 0) {
+                    const eventStr = buffer.substring(0, eventEndIndex);
+                    buffer = buffer.substring(eventEndIndex + 2);
+
+                    if (eventStr.startsWith('data:')) {
+                        const dataStr = eventStr.substring(5);
                         try {
                             const data = JSON.parse(dataStr);
                             if (data.type === 'citations') {
@@ -210,13 +250,12 @@ document.addEventListener('DOMContentLoaded', () => {
                                 messageBubble.innerHTML = `<p class="error">${data.payload}</p>`;
                             }
                         } catch (e) {
-                            // Ignore incomplete JSON chunks
+                            console.error("Failed to parse SSE event JSON:", e, "Data:", dataStr);
                         }
                     }
                 }
             }
             updateSessionPreview(currentSessionId, message);
-
         } catch (error) {
             console.error('Error sending message:', error);
             messageBubble.innerHTML = 'Sorry, I am unable to connect to the server. Please try again later.';
@@ -233,12 +272,12 @@ document.addEventListener('DOMContentLoaded', () => {
         chatMessages.innerHTML = `
             <div class="chat-message bot-message intro-message">
                 <div class="message-bubble">
-                    Hello! I am the <strong>AI Powered Career Guidance Tool</strong>, an expert on the Refracted Economies Framework. I'm here to provide detailed, comprehensive, and strategic career guidance. How can I assist you today?
+                    Hello! I am an <strong>AI-Powered Career Guidance tool</strong>, built upon the HSRC's Refracted Economies Framework. I'm here to provide detailed, comprehensive, and strategic career guidance. How can I assist you today?
                 </div>
             </div>
         `;
         displayCitations([]);
-        userInput.value = '';
+        resetTextarea();
         listSessions();
         updateActiveSessionUI();
         userInput.focus();
@@ -246,9 +285,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function loadSession(sessionId) {
         if (isLoading || !sessionId) return;
+
+        disableHeroMode();
+        showLoading();
         
-        showLoading(true);
-        loadingOverlay.style.display = 'flex';
         currentSessionId = sessionId;
         saveCurrentSessionId(sessionId);
         chatMessages.innerHTML = '';
@@ -267,9 +307,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const messageCitations = Array.isArray(turn.citations) ? turn.citations : [];
                         const sender = turn.role === 'user' ? 'user' : 'bot';
                         addMessage(sender, messageText, messageCitations);
-                        if (sender === 'bot') {
-                            lastBotCitations = messageCitations;
-                        }
+                        if (sender === 'bot') lastBotCitations = messageCitations;
                     }
                 });
                 displayCitations(lastBotCitations);
@@ -281,7 +319,6 @@ document.addEventListener('DOMContentLoaded', () => {
             addMessage('bot', 'Failed to load chat history due to a network error.');
         } finally {
             hideLoading();
-            loadingOverlay.style.display = 'none';
             updateActiveSessionUI();
         }
     }
@@ -293,7 +330,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
 
             sessionList.innerHTML = '';
-            if (data.success && data.sessions.length > 0) {
+            if (data.sessions && data.sessions.length > 0) {
                 data.sessions.forEach(session => {
                     const listItem = createSessionListItem(session);
                     sessionList.appendChild(listItem);
@@ -307,7 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         updateActiveSessionUI();
     }
-    
+
     function createSessionListItem(session) {
         const listItem = document.createElement('li');
         listItem.classList.add('session-item');
@@ -321,7 +358,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             </div>
         `;
-        listItem.querySelector('.session-item-text').addEventListener('click', () => loadSession(session.id));
+
+        listItem.querySelector('.session-item-text').addEventListener('click', () => {
+            disableHeroMode();
+            loadSession(session.id);
+        });
+
         const menuBtn = listItem.querySelector('.session-menu-btn');
         const menuDropdown = listItem.querySelector('.session-menu-dropdown');
         menuBtn.addEventListener('click', e => {
@@ -340,9 +382,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(`/api/delete_session/${sessionId}`, { method: 'DELETE' });
             const data = await response.json();
             if (data.success) {
-                if (currentSessionId === sessionId) {
-                    startNewChat();
-                }
+                if (currentSessionId === sessionId) startNewChat();
                 listSessions();
             } else {
                 alert('Failed to delete session: ' + (data.message || 'Unknown error.'));
@@ -352,7 +392,7 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('An error occurred while deleting the session.');
         }
     }
-    
+
     function updateActiveSessionUI() {
         document.querySelectorAll('.session-item').forEach(item => {
             item.classList.toggle('active', item.dataset.sessionId === currentSessionId);
@@ -361,19 +401,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateSessionPreview(sessionId, latestUserMessage) {
         let sessionItem = document.querySelector(`.session-item[data-session-id="${sessionId}"]`);
-        if (!sessionItem) {
-             listSessions(); 
-             return;
-        }
+        if (!sessionItem) { listSessions(); return; }
         const previewText = sessionItem.querySelector('.session-item-text');
         if (previewText && (previewText.textContent === 'New Chat Session' || !previewText.textContent)) {
             previewText.textContent = latestUserMessage.substring(0, 50) + (latestUserMessage.length > 50 ? '...' : '');
         }
         sessionList.prepend(sessionItem);
     }
-    
+
     // --- Event Listeners & Initial Load ---
-    
     sendBtn.addEventListener('click', sendMessage);
     userInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && !event.shiftKey) {
@@ -381,28 +417,28 @@ document.addEventListener('DOMContentLoaded', () => {
             sendMessage();
         }
     });
+
+    userInput.addEventListener('input', autosizeTextarea);
+    userInput.addEventListener('paste', () => setTimeout(autosizeTextarea, 0));
+    window.addEventListener('load', autosizeTextarea);
+
     newChatBtn.addEventListener('click', startNewChat);
-    
     chatMessages.addEventListener('click', handleCitationClick);
-    
-    // Desktop sidebar toggle
+
     toggleSidebarBtn.addEventListener('click', () => {
         sidebar.classList.toggle('collapsed');
         const isCollapsed = sidebar.classList.contains('collapsed');
         toggleIcon.className = isCollapsed ? 'fas fa-chevron-right' : 'fas fa-chevron-left';
     });
 
-    // **FIX:** Added event listeners for mobile panel toggles
     mobileHistoryBtn.addEventListener('click', () => {
         sidebar.classList.add('open');
         overlayBackdrop.style.display = 'block';
     });
-
     mobileReferencesBtn.addEventListener('click', () => {
         referencesPanel.classList.add('open');
         overlayBackdrop.style.display = 'block';
     });
-
     overlayBackdrop.addEventListener('click', () => {
         sidebar.classList.remove('open');
         referencesPanel.classList.remove('open');
@@ -423,6 +459,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             startNewChat();
         }
+        enableHeroModeOnLoad();
     }
     
     initializeApp();
