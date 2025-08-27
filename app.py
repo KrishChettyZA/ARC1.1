@@ -132,20 +132,42 @@ app = Flask(__name__)
 
 # --- Directory and Database Initialization ---
 def setup_database_and_directories():
-    base_dir = Path(__file__).parent
-    storage_path = base_dir / "arc_chroma_db_storage"
-    pdf_dir = base_dir / "documents"
-    history_dir = base_dir / "history"
-    receipts_dir = base_dir / "processing_receipts"
+    # --- MODIFICATION START: Use persistent storage on Render ---
+    # Check if the standard Render disk mount path exists.
+    render_data_path = Path("/data/arc_chroma_db_storage")
+    if render_data_path.is_dir():
+        # We are on Render, use the persistent disk as the base directory for all data.
+        base_data_dir = render_data_path
+        logging.info(f"✅ Detected Render environment. Using persistent disk at {base_data_dir}")
+    else:
+        # We are running locally, use the script's directory.
+        base_data_dir = Path(__file__).parent
+        logging.info(f"✅ Detected local environment. Using project directory for data.")
+
+    # Define all data paths based on the determined base directory.
+    storage_path = base_data_dir / "arc_chroma_db_storage"
+    history_dir = base_data_dir / "history"
+    receipts_dir = base_data_dir / "processing_receipts"
     
-    pdf_dir.mkdir(exist_ok=True); history_dir.mkdir(exist_ok=True); storage_path.mkdir(parents=True, exist_ok=True); receipts_dir.mkdir(exist_ok=True)
+    # PDF documents are part of the repo, so their path is always relative to the script.
+    pdf_dir = Path(__file__).parent / "documents"
+    
+    # Create directories if they don't exist.
+    storage_path.mkdir(parents=True, exist_ok=True)
+    history_dir.mkdir(exist_ok=True)
+    receipts_dir.mkdir(exist_ok=True)
     
     logging.info(f"📁 PDF Directory: {pdf_dir.resolve()}")
     logging.info(f"📁 ChromaDB Storage: {storage_path.resolve()}")
+    logging.info(f"📁 History Directory: {history_dir.resolve()}")
+    logging.info(f"📁 Receipts Directory: {receipts_dir.resolve()}")
+    # --- MODIFICATION END ---
+
     client = chromadb.PersistentClient(path=str(storage_path))
     collection_name = "arc_career_guidance_pure_rag_v1"
     
-    run_embeddings_file = base_dir / "RUN-EMBEDDINGS"
+    # Use the local project directory to check for the trigger file.
+    run_embeddings_file = Path(__file__).parent / "RUN-EMBEDDINGS"
     if run_embeddings_file.exists():
         logging.warning("🚨 'RUN-EMBEDDINGS' file found. Forcing a full re-embedding of all documents.")
         try:
